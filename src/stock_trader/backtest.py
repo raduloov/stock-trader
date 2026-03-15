@@ -61,20 +61,27 @@ class BacktestEngine:
         self._connected = True
 
         for ticker in self.config.watchlist:
-            logger.info("Backtest: fetching historical data for %s on %s", ticker, self.date)
+            print(f"  Fetching {ticker}...", end=" ", flush=True)
             contract = Stock(ticker, "SMART", "USD")
             self.ib.qualifyContracts(contract)
 
-            # Fetch full day of 1-min bars
-            ib_bars = self.ib.reqHistoricalData(
-                contract,
-                endDateTime=f"{self.date} 23:59:59 US/Eastern",
-                durationStr="1 D",
-                barSizeSetting="1 min",
-                whatToShow="TRADES",
-                useRTH=True,
-                formatDate=1,
-            )
+            # Retry up to 3 times — IBKR sometimes rejects first requests
+            ib_bars = None
+            for attempt in range(3):
+                ib_bars = self.ib.reqHistoricalData(
+                    contract,
+                    endDateTime=f"{self.date} 23:59:59 US/Eastern",
+                    durationStr="1 D",
+                    barSizeSetting="1 min",
+                    whatToShow="TRADES",
+                    useRTH=True,
+                    formatDate=1,
+                )
+                if ib_bars:
+                    break
+                if attempt < 2:
+                    print(f"retry {attempt + 2}...", end=" ", flush=True)
+                    self.ib.sleep(2)
 
             if ib_bars:
                 self._all_bars[ticker] = [
@@ -88,9 +95,9 @@ class BacktestEngine:
                     )
                     for b in ib_bars
                 ]
-                logger.info("Backtest: loaded %d bars for %s", len(self._all_bars[ticker]), ticker)
+                print(f"{len(self._all_bars[ticker])} bars")
             else:
-                logger.warning("Backtest: no data for %s on %s", ticker, self.date)
+                print("no data!")
                 self._all_bars[ticker] = []
 
             self._bars[ticker] = []
@@ -99,6 +106,14 @@ class BacktestEngine:
         # Disconnect from IBKR — we don't need it during replay
         self.ib.disconnect()
         self._connected = False
+
+        total_loaded = sum(len(bars) for bars in self._all_bars.values())
+        if total_loaded == 0:
+            print(f"\nNo data loaded for {self.date}. Possible reasons:")
+            print(f"  - Markets were closed on that date (weekend/holiday)")
+            print(f"  - IBKR 'different IP' error — wait a minute and try again")
+            print(f"  - Date is in the future")
+            raise SystemExit(1)
 
         self._total_bars = max(len(bars) for bars in self._all_bars.values()) if self._all_bars else 0
         logger.info("Backtest: ready to replay %d bars", self._total_bars)
