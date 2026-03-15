@@ -1,12 +1,27 @@
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
 from stock_trader.config import load_config
 
 
+def _load_env() -> None:
+    """Load environment variables from .env file if it exists."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
+
 def main() -> None:
+    _load_env()
     parser = argparse.ArgumentParser(description="Stock Day Trader")
     parser.add_argument(
         "-c", "--config",
