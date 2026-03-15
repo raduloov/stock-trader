@@ -36,6 +36,13 @@ def main() -> None:
         action="store_true",
         help="Use looser strategy thresholds (RSI<45 buy, RSI>55 sell) to see more trades in backtest",
     )
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        choices=["classic", "ai"],
+        default="classic",
+        help="Strategy to use: 'classic' (indicator rules) or 'ai' (Claude-powered). Default: classic",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -47,29 +54,35 @@ def main() -> None:
         print(f"Config file not found: {args.config}")
         sys.exit(1)
 
+    if args.strategy == "ai":
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("Error: ANTHROPIC_API_KEY environment variable is required for AI strategy.")
+            print("Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            sys.exit(1)
+
     config = load_config(args.config)
 
     if args.backtest:
-        if args.aggressive:
+        if args.aggressive and args.strategy == "classic":
             config.strategy.rsi_oversold = 45
             config.strategy.rsi_overbought = 55
             config.strategy.confidence_threshold = 0.3
-        _run_backtest(config, args.backtest, args.speed, aggressive=args.aggressive)
+        _run_backtest(config, args.backtest, args.speed, args.strategy)
     else:
-        _run_live(config)
+        _run_live(config, args.strategy)
 
 
-def _run_backtest(config, date: str, speed: float, aggressive: bool = False) -> None:
+def _run_backtest(config, date: str, speed: float, strategy: str) -> None:
     from stock_trader.backtest import BacktestEngine
     from stock_trader.cli import TradingCLI
 
-    mode = "AGGRESSIVE" if aggressive else "NORMAL"
-    print(f"Stock Day Trader v0.1.0 — BACKTEST MODE ({mode})")
-    print(f"Replaying {date} | Speed: {speed}s/bar")
+    print(f"Stock Day Trader v0.1.0 — BACKTEST MODE")
+    print(f"Replaying {date} | Speed: {speed}s/bar | Strategy: {strategy}")
     print(f"Watchlist: {', '.join(config.watchlist)}")
     print()
 
-    engine = BacktestEngine(config, date=date, speed=speed)
+    engine = BacktestEngine(config, date=date, speed=speed, strategy=strategy)
     cli = TradingCLI(engine)
 
     try:
@@ -85,16 +98,16 @@ def _run_backtest(config, date: str, speed: float, aggressive: bool = False) -> 
         engine.stop()
 
 
-def _run_live(config) -> None:
+def _run_live(config, strategy: str) -> None:
     from stock_trader.engine import Engine
     from stock_trader.cli import TradingCLI
 
     print(f"Stock Day Trader v0.1.0")
     print(f"Connecting to IBKR at {config.ibkr.host}:{config.ibkr.port} (paper trading)")
-    print(f"Watchlist: {', '.join(config.watchlist)}")
+    print(f"Strategy: {strategy} | Watchlist: {', '.join(config.watchlist)}")
     print()
 
-    engine = Engine(config)
+    engine = Engine(config, strategy=strategy)
     cli = TradingCLI(engine)
 
     try:

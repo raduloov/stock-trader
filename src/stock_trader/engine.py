@@ -5,6 +5,7 @@ from stock_trader.config import Config, save_config
 from stock_trader.market_data import MarketDataManager
 from stock_trader.analysis import compute_indicators
 from stock_trader.strategy import evaluate
+from stock_trader.strategy_ai import evaluate_ai
 from stock_trader.execution import ExecutionManager
 from stock_trader.models import Bar, Signal, Trade
 
@@ -17,10 +18,12 @@ class Engine:
         config: Config,
         on_signal: Callable[[Signal], None] | None = None,
         on_trade: Callable[[Trade], None] | None = None,
+        strategy: str = "classic",
     ):
         self.config = config
         self.on_signal = on_signal
         self.on_trade = on_trade
+        self.strategy_mode = strategy
 
         self.execution = ExecutionManager(
             config=config.risk,
@@ -73,7 +76,10 @@ class Engine:
         indicators = compute_indicators(ticker, bars, self.config.analysis)
 
         # 2. Evaluate strategy
-        signal = evaluate(indicators, self.config.strategy)
+        if self.strategy_mode == "ai":
+            signal = evaluate_ai(indicators, bars, self.config.strategy, self.execution.positions)
+        else:
+            signal = evaluate(indicators, self.config.strategy)
 
         if self.on_signal:
             self.on_signal(signal)

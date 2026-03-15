@@ -13,6 +13,7 @@ from ib_insync import IB, Stock
 from stock_trader.config import Config
 from stock_trader.analysis import compute_indicators
 from stock_trader.strategy import evaluate
+from stock_trader.strategy_ai import evaluate_ai
 from stock_trader.execution import ExecutionManager
 from stock_trader.models import Bar, Signal, Trade
 
@@ -27,10 +28,12 @@ class BacktestEngine:
         config: Config,
         date: str,
         speed: float = 0.1,
+        strategy: str = "classic",
     ):
         self.config = config
         self.date = date
         self.speed = speed  # seconds between bar replays
+        self.strategy_mode = strategy
 
         self.execution = ExecutionManager(
             config=config.risk,
@@ -154,7 +157,10 @@ class BacktestEngine:
             return
 
         indicators = compute_indicators(ticker, bars, self.config.analysis)
-        signal = evaluate(indicators, self.config.strategy)
+        if self.strategy_mode == "ai":
+            signal = evaluate_ai(indicators, bars, self.config.strategy, self.execution.positions)
+        else:
+            signal = evaluate(indicators, self.config.strategy)
 
         if self.on_signal:
             self.on_signal(signal)

@@ -1,18 +1,16 @@
 ibkr:
-  host: "127.0.0.1"
+  host: 127.0.0.1
   port: 7497
   client_id: 10
-
 watchlist:
-  - AAPL
-  - TSLA
-  - NVDA
-  - SPY
-
+- AAPL
+- TSLA
+- NVDA
+- SPY
+- O
 market_data:
-  bar_size: "5 secs"
+  bar_size: 5 secs
   history_window: 100
-
 analysis:
   sma_period: 20
   ema_period: 12
@@ -22,13 +20,11 @@ analysis:
   macd_signal: 9
   bollinger_period: 20
   bollinger_std: 2
-
 strategy:
   confidence_threshold: 0.6
   rsi_oversold: 30
   rsi_overbought: 70
   stop_loss_pct: 2.0
-
 risk:
   max_position_value: 1000
   max_open_positions: 5
