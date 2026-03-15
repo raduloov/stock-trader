@@ -215,7 +215,7 @@ class TradingCLI:
         input_thread = threading.Thread(target=self._input_loop, daemon=True)
         input_thread.start()
 
-        with Live(self._build_display(), refresh_per_second=2, console=self.console) as live:
+        with Live(self._build_display(), refresh_per_second=2, console=self.console, screen=True) as live:
             while self._running:
                 try:
                     self.engine.sleep(0.5)
