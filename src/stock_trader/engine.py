@@ -1,7 +1,7 @@
 import logging
 from typing import Callable
 
-from stock_trader.config import Config
+from stock_trader.config import Config, save_config
 from stock_trader.market_data import MarketDataManager
 from stock_trader.analysis import compute_indicators
 from stock_trader.strategy import evaluate
@@ -113,12 +113,14 @@ class Engine:
         if ticker not in self.config.watchlist:
             self.config.watchlist.append(ticker)
             self.market_data.subscribe(ticker)
+            save_config(self.config)
             logger.info("Added %s to watchlist", ticker)
 
     def remove_ticker(self, ticker: str) -> None:
         if ticker in self.config.watchlist:
             self.config.watchlist.remove(ticker)
             self.market_data.unsubscribe(ticker)
+            save_config(self.config)
             logger.info("Removed %s from watchlist", ticker)
 
     def pause(self) -> None:

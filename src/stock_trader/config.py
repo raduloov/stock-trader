@@ -59,7 +59,7 @@ def load_config(path: Path) -> Config:
     with open(path) as f:
         raw = yaml.safe_load(f)
 
-    return Config(
+    config = Config(
         ibkr=IbkrConfig(**raw.get("ibkr", {})),
         watchlist=raw.get("watchlist", ["SPY"]),
         market_data=MarketDataConfig(**raw.get("market_data", {})),
@@ -67,3 +67,20 @@ def load_config(path: Path) -> Config:
         strategy=StrategyConfig(**raw.get("strategy", {})),
         risk=RiskConfig(**raw.get("risk", {})),
     )
+    config._path = path
+    config._raw = raw
+    return config
+
+
+def save_config(config: Config) -> None:
+    """Save the current config back to its YAML file."""
+    path = getattr(config, "_path", None)
+    raw = getattr(config, "_raw", None)
+    if not path or not raw:
+        return
+
+    # Update only the watchlist in the raw config (preserves comments/formatting order)
+    raw["watchlist"] = config.watchlist
+
+    with open(path, "w") as f:
+        yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
