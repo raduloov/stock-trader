@@ -31,6 +31,11 @@ def main() -> None:
         default=0.1,
         help="Backtest replay speed in seconds per bar (default: 0.1)",
     )
+    parser.add_argument(
+        "--aggressive",
+        action="store_true",
+        help="Use looser strategy thresholds (RSI<45 buy, RSI>55 sell) to see more trades in backtest",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -45,16 +50,21 @@ def main() -> None:
     config = load_config(args.config)
 
     if args.backtest:
-        _run_backtest(config, args.backtest, args.speed)
+        if args.aggressive:
+            config.strategy.rsi_oversold = 45
+            config.strategy.rsi_overbought = 55
+            config.strategy.confidence_threshold = 0.3
+        _run_backtest(config, args.backtest, args.speed, aggressive=args.aggressive)
     else:
         _run_live(config)
 
 
-def _run_backtest(config, date: str, speed: float) -> None:
+def _run_backtest(config, date: str, speed: float, aggressive: bool = False) -> None:
     from stock_trader.backtest import BacktestEngine
     from stock_trader.cli import TradingCLI
 
-    print(f"Stock Day Trader v0.1.0 — BACKTEST MODE")
+    mode = "AGGRESSIVE" if aggressive else "NORMAL"
+    print(f"Stock Day Trader v0.1.0 — BACKTEST MODE ({mode})")
     print(f"Replaying {date} | Speed: {speed}s/bar")
     print(f"Watchlist: {', '.join(config.watchlist)}")
     print()
