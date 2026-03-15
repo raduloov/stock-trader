@@ -25,6 +25,7 @@ class TradingCLI:
         self._input_buffer = ""
         self._input_prompt = ""
         self._status_message = ""
+        self._is_ai = getattr(engine, 'strategy_mode', 'classic') == 'ai'
 
         self.engine.on_signal = self._on_signal
         self.engine.on_trade = self._on_trade
@@ -133,11 +134,36 @@ class TradingCLI:
                 trade.ticker,
                 str(trade.quantity),
                 f"{trade.price:.2f}",
-                trade.reason[:40],
+                trade.reason[:50],
             )
 
         if not self.engine.execution.trades:
             table.add_row("[dim]No trades yet[/dim]", "", "", "", "", "")
+
+        return table
+
+    def _build_ai_panel(self) -> Table:
+        """Show latest AI reasoning for each ticker."""
+        table = Table(title="AI Analysis", expand=True)
+        table.add_column("Ticker", style="bold", width=8)
+        table.add_column("Signal", justify="center", width=12)
+        table.add_column("Reasoning")
+
+        for ticker in self.engine.config.watchlist:
+            signal = self.signals.get(ticker)
+            if signal and signal.reason.startswith("AI:"):
+                reason = signal.reason[4:]  # strip "AI: " prefix
+                if signal.action == "BUY":
+                    sig_str = f"[bold green]BUY {signal.confidence:.0%}[/bold green]"
+                elif signal.action == "SELL":
+                    sig_str = f"[bold red]SELL {signal.confidence:.0%}[/bold red]"
+                else:
+                    sig_str = f"[dim]HOLD {signal.confidence:.0%}[/dim]"
+                table.add_row(ticker, sig_str, reason[:80])
+            elif signal:
+                table.add_row(ticker, "[dim]---[/dim]", f"[dim]{signal.reason[:80]}[/dim]")
+            else:
+                table.add_row(ticker, "[dim]---[/dim]", "[dim]Waiting for data...[/dim]")
 
         return table
 
@@ -160,7 +186,10 @@ class TradingCLI:
         text.append("  |  ")
         text.append(status, style=status_color)
 
-        # Show backtest progress or IBKR connection status
+        if self._is_ai:
+            text.append("  |  ")
+            text.append("AI", style="bold magenta")
+
         is_backtest = hasattr(self.engine, '_replay_done')
         if is_backtest:
             if self.engine._replay_done:
@@ -171,7 +200,6 @@ class TradingCLI:
                 total = self.engine._total_bars
                 pct = (progress / total * 100) if total > 0 else 0
                 text.append(f"  |  Bar {progress}/{total} ({pct:.0f}%)")
-                # Show current replay time
                 for ticker in self.engine.config.watchlist:
                     bars = self.engine.market_data.get_bars(ticker)
                     if bars:
@@ -216,13 +244,29 @@ class TradingCLI:
 
     def _build_display(self) -> Layout:
         layout = Layout()
-        layout.split_column(
-            Layout(Panel(self._build_watchlist_table()), name="watchlist", ratio=3),
-            Layout(Panel(self._build_positions_table()), name="positions", ratio=2),
-            Layout(Panel(self._build_trades_table()), name="trades", ratio=3),
-            Layout(Panel(self._build_status_bar()), name="status", size=3),
-            Layout(Panel(self._build_help_bar()), name="help", size=3),
-        )
+
+        if self._is_ai:
+            # AI mode: show analysis panel instead of larger trade log
+            layout.split_column(
+                Layout(Panel(self._build_watchlist_table()), name="watchlist", ratio=2),
+                Layout(Panel(self._build_ai_panel()), name="ai", ratio=3),
+                Layout(name="middle", ratio=2),
+                Layout(Panel(self._build_trades_table()), name="trades", ratio=2),
+                Layout(Panel(self._build_status_bar()), name="status", size=3),
+                Layout(Panel(self._build_help_bar()), name="help", size=3),
+            )
+            layout["middle"].split_row(
+                Layout(Panel(self._build_positions_table()), name="positions"),
+            )
+        else:
+            layout.split_column(
+                Layout(Panel(self._build_watchlist_table()), name="watchlist", ratio=3),
+                Layout(Panel(self._build_positions_table()), name="positions", ratio=2),
+                Layout(Panel(self._build_trades_table()), name="trades", ratio=3),
+                Layout(Panel(self._build_status_bar()), name="status", size=3),
+                Layout(Panel(self._build_help_bar()), name="help", size=3),
+            )
+
         return layout
 
     def _read_key(self) -> str | None:
@@ -235,7 +279,6 @@ class TradingCLI:
     def _handle_key(self, key: str) -> None:
         if self._input_mode:
             if key == "\n" or key == "\r":
-                # Submit input
                 ticker = self._input_buffer.strip().upper()
                 if ticker:
                     if self._input_prompt.startswith("Add"):
@@ -257,7 +300,6 @@ class TradingCLI:
                 self._input_buffer += key
             return
 
-        # Clear status message on any key
         self._status_message = ""
 
         if key == "a":
@@ -278,7 +320,6 @@ class TradingCLI:
     def run(self) -> None:
         self._running = True
 
-        # Set terminal to raw mode for single keypress reading
         old_settings = termios.tcgetattr(sys.stdin)
         try:
             tty.setcbreak(sys.stdin.fileno())
@@ -291,12 +332,10 @@ class TradingCLI:
                         self._running = False
                         break
 
-                    # Check for keypress
                     key = self._read_key()
                     if key:
                         self._handle_key(key)
 
                     live.update(self._build_display())
         finally:
-            # Restore terminal settings
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
