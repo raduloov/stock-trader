@@ -151,8 +151,6 @@ class TradingCLI:
 
         status = "HALTED" if exec_mgr.is_halted else "PAUSED" if exec_mgr.is_paused else "ACTIVE"
         status_color = "red" if exec_mgr.is_halted else "yellow" if exec_mgr.is_paused else "green"
-        connected = self.engine.market_data.ib.isConnected()
-        conn_str = "[green]Connected[/green]" if connected else "[red]Disconnected[/red]"
 
         text = Text()
         text.append("  P/L: ", style="bold")
@@ -161,8 +159,33 @@ class TradingCLI:
         text.append(f"  |  Loss limit: {limit_used:.0f}%")
         text.append("  |  ")
         text.append(status, style=status_color)
-        text.append("  |  IBKR: ")
-        text.append_text(Text.from_markup(conn_str))
+
+        # Show backtest progress or IBKR connection status
+        is_backtest = hasattr(self.engine, '_replay_done')
+        if is_backtest:
+            if self.engine._replay_done:
+                text.append("  |  ", style="bold")
+                text.append("REPLAY COMPLETE", style="bold green")
+            else:
+                progress = self.engine._bar_count
+                total = self.engine._total_bars
+                pct = (progress / total * 100) if total > 0 else 0
+                text.append(f"  |  Bar {progress}/{total} ({pct:.0f}%)")
+                # Show current replay time
+                for ticker in self.engine.config.watchlist:
+                    bars = self.engine.market_data.get_bars(ticker)
+                    if bars:
+                        text.append(f"  |  {bars[-1].timestamp:%H:%M}")
+                        break
+        else:
+            try:
+                connected = self.engine.market_data.ib.isConnected()
+                conn_str = "[green]Connected[/green]" if connected else "[red]Disconnected[/red]"
+            except Exception:
+                conn_str = "[dim]N/A[/dim]"
+            text.append("  |  IBKR: ")
+            text.append_text(Text.from_markup(conn_str))
+
         return text
 
     def _build_help_bar(self) -> Text:

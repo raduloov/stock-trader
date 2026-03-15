@@ -1,12 +1,9 @@
-# src/stock_trader/main.py
 import argparse
 import logging
 import sys
 from pathlib import Path
 
 from stock_trader.config import load_config
-from stock_trader.engine import Engine
-from stock_trader.cli import TradingCLI
 
 
 def main() -> None:
@@ -22,6 +19,18 @@ def main() -> None:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--backtest",
+        type=str,
+        metavar="DATE",
+        help="Run backtest for a date (e.g., 2026-03-14). Requires IBKR connection to fetch data.",
+    )
+    parser.add_argument(
+        "--speed",
+        type=float,
+        default=0.1,
+        help="Backtest replay speed in seconds per bar (default: 0.1)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -34,6 +43,41 @@ def main() -> None:
         sys.exit(1)
 
     config = load_config(args.config)
+
+    if args.backtest:
+        _run_backtest(config, args.backtest, args.speed)
+    else:
+        _run_live(config)
+
+
+def _run_backtest(config, date: str, speed: float) -> None:
+    from stock_trader.backtest import BacktestEngine
+    from stock_trader.cli import TradingCLI
+
+    print(f"Stock Day Trader v0.1.0 — BACKTEST MODE")
+    print(f"Replaying {date} | Speed: {speed}s/bar")
+    print(f"Watchlist: {', '.join(config.watchlist)}")
+    print()
+
+    engine = BacktestEngine(config, date=date, speed=speed)
+    cli = TradingCLI(engine)
+
+    try:
+        engine.start()
+        cli.run()
+    except KeyboardInterrupt:
+        print("\nBacktest stopped.")
+    except ConnectionRefusedError:
+        print(f"\nCould not connect to IBKR at {config.ibkr.host}:{config.ibkr.port}")
+        print("IBKR connection is needed to fetch historical data for backtest.")
+        sys.exit(1)
+    finally:
+        engine.stop()
+
+
+def _run_live(config) -> None:
+    from stock_trader.engine import Engine
+    from stock_trader.cli import TradingCLI
 
     print(f"Stock Day Trader v0.1.0")
     print(f"Connecting to IBKR at {config.ibkr.host}:{config.ibkr.port} (paper trading)")
