@@ -1,4 +1,6 @@
-# src/stock_trader/cli.py
+import sys
+import tty
+import termios
 import threading
 from datetime import datetime
 
@@ -17,10 +19,13 @@ class TradingCLI:
     def __init__(self, engine: Engine):
         self.engine = engine
         self.console = Console()
-        self.signals: dict[str, Signal] = {}  # latest signal per ticker
+        self.signals: dict[str, Signal] = {}
         self._running = False
+        self._input_mode = False
+        self._input_buffer = ""
+        self._input_prompt = ""
+        self._status_message = ""
 
-        # Register callbacks
         self.engine.on_signal = self._on_signal
         self.engine.on_trade = self._on_trade
 
@@ -28,7 +33,7 @@ class TradingCLI:
         self.signals[signal.ticker] = signal
 
     def _on_trade(self, trade: Trade) -> None:
-        pass  # Trades are tracked in engine.execution.trades
+        self._status_message = f"Trade: {trade.action} {trade.ticker} {trade.quantity}x @ {trade.price:.2f}"
 
     def _build_watchlist_table(self) -> Table:
         table = Table(title="Watchlist", expand=True)
@@ -43,7 +48,6 @@ class TradingCLI:
             bars = self.engine.market_data.get_bars(ticker)
             price = f"{bars[-1].close:.2f}" if bars else "---"
 
-            # Calculate price change from previous bar
             change_str = "---"
             if bars and len(bars) >= 2:
                 prev = bars[-2].close
@@ -58,7 +62,6 @@ class TradingCLI:
             signal_str = "---"
 
             if signal:
-                # Get RSI from latest analysis
                 from stock_trader.analysis import compute_indicators
                 indicators = compute_indicators(
                     ticker, bars, self.engine.config.analysis
@@ -122,7 +125,6 @@ class TradingCLI:
         table.add_column("Price", justify="right")
         table.add_column("Reason")
 
-        # Show last 10 trades
         for trade in self.engine.execution.trades[-10:]:
             action_style = "green" if trade.action == "BUY" else "red"
             table.add_row(
@@ -153,14 +155,40 @@ class TradingCLI:
         conn_str = "[green]Connected[/green]" if connected else "[red]Disconnected[/red]"
 
         text = Text()
-        text.append(f"  Daily P/L: ", style="bold")
+        text.append("  P/L: ", style="bold")
         text.append(f"${pnl:+.2f}", style=pnl_color)
         text.append(f"  |  Trades: {trade_count}")
         text.append(f"  |  Loss limit: {limit_used:.0f}%")
-        text.append(f"  |  Status: ")
+        text.append("  |  ")
         text.append(status, style=status_color)
-        text.append(f"  |  IBKR: ")
+        text.append("  |  IBKR: ")
         text.append_text(Text.from_markup(conn_str))
+        return text
+
+    def _build_help_bar(self) -> Text:
+        if self._input_mode:
+            text = Text()
+            text.append(f"  {self._input_prompt}", style="bold yellow")
+            text.append(self._input_buffer, style="bold white")
+            text.append("_", style="blink bold white")
+            return text
+
+        if self._status_message:
+            text = Text()
+            text.append(f"  {self._status_message}", style="bold cyan")
+            return text
+
+        text = Text()
+        text.append("  [a]", style="bold green")
+        text.append("dd  ")
+        text.append("[r]", style="bold red")
+        text.append("emove  ")
+        text.append("[p]", style="bold yellow")
+        text.append("ause  ")
+        text.append("[u]", style="bold yellow")
+        text.append("npause  ")
+        text.append("[q]", style="bold")
+        text.append("uit")
         return text
 
     def _build_display(self) -> Layout:
@@ -170,56 +198,82 @@ class TradingCLI:
             Layout(Panel(self._build_positions_table()), name="positions", ratio=2),
             Layout(Panel(self._build_trades_table()), name="trades", ratio=3),
             Layout(Panel(self._build_status_bar()), name="status", size=3),
+            Layout(Panel(self._build_help_bar()), name="help", size=3),
         )
         return layout
 
-    def _input_loop(self) -> None:
-        """Handle user commands in a background thread."""
-        while self._running:
-            try:
-                cmd = input().strip().lower()
-            except EOFError:
-                break
+    def _read_key(self) -> str | None:
+        """Read a single keypress without blocking (non-blocking)."""
+        import select
+        if select.select([sys.stdin], [], [], 0)[0]:
+            return sys.stdin.read(1)
+        return None
 
-            parts = cmd.split()
-            if not parts:
-                continue
+    def _handle_key(self, key: str) -> None:
+        if self._input_mode:
+            if key == "\n" or key == "\r":
+                # Submit input
+                ticker = self._input_buffer.strip().upper()
+                if ticker:
+                    if self._input_prompt.startswith("Add"):
+                        self.engine.add_ticker(ticker)
+                        self._status_message = f"Added {ticker}"
+                    elif self._input_prompt.startswith("Remove"):
+                        self.engine.remove_ticker(ticker)
+                        self._status_message = f"Removed {ticker}"
+                self._input_mode = False
+                self._input_buffer = ""
+                self._input_prompt = ""
+            elif key == "\x1b":  # Escape
+                self._input_mode = False
+                self._input_buffer = ""
+                self._input_prompt = ""
+            elif key == "\x7f" or key == "\b":  # Backspace
+                self._input_buffer = self._input_buffer[:-1]
+            elif key.isalnum():
+                self._input_buffer += key
+            return
 
-            command = parts[0]
+        # Clear status message on any key
+        self._status_message = ""
 
-            if command == "quit":
-                self._running = False
-                self.engine.stop()
-                break
-            elif command == "add" and len(parts) == 2:
-                self.engine.add_ticker(parts[1].upper())
-            elif command == "remove" and len(parts) == 2:
-                self.engine.remove_ticker(parts[1].upper())
-            elif command == "pause":
-                self.engine.pause()
-            elif command == "resume":
-                self.engine.resume()
-            elif command == "status":
-                self.console.print(f"Connected: {self.engine.market_data.ib.isConnected()}")
-            elif command == "trades":
-                for t in self.engine.execution.trades:
-                    self.console.print(
-                        f"{t.timestamp:%H:%M:%S} {t.action} {t.ticker} "
-                        f"{t.quantity}x @ {t.price:.2f} ({t.reason})"
-                    )
+        if key == "a":
+            self._input_mode = True
+            self._input_prompt = "Add ticker: "
+        elif key == "r":
+            self._input_mode = True
+            self._input_prompt = "Remove ticker: "
+        elif key == "p":
+            self.engine.pause()
+            self._status_message = "Trading paused"
+        elif key == "u":
+            self.engine.resume()
+            self._status_message = "Trading resumed"
+        elif key == "q":
+            self._running = False
 
     def run(self) -> None:
         self._running = True
 
-        # Start command input in background thread
-        input_thread = threading.Thread(target=self._input_loop, daemon=True)
-        input_thread.start()
+        # Set terminal to raw mode for single keypress reading
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setcbreak(sys.stdin.fileno())
 
-        with Live(self._build_display(), refresh_per_second=2, console=self.console, screen=True) as live:
-            while self._running:
-                try:
-                    self.engine.sleep(0.5)
-                except (ConnectionError, OSError):
-                    self._running = False
-                    break
-                live.update(self._build_display())
+            with Live(self._build_display(), refresh_per_second=2, console=self.console, screen=True) as live:
+                while self._running:
+                    try:
+                        self.engine.sleep(0.1)
+                    except (ConnectionError, OSError):
+                        self._running = False
+                        break
+
+                    # Check for keypress
+                    key = self._read_key()
+                    if key:
+                        self._handle_key(key)
+
+                    live.update(self._build_display())
+        finally:
+            # Restore terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
