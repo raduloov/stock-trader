@@ -37,11 +37,18 @@ class Engine:
         logger.info("Connecting to IBKR at %s:%d", self.config.ibkr.host, self.config.ibkr.port)
         self.market_data.connect()
 
+        # TEMPORARY: Use polling mode until real-time market data subscriptions
+        # are set up in IBKR. Once you have real-time permissions, remove this
+        # line to use streaming mode instead.
+        self.market_data.enable_polling_mode()
+
         for ticker in self.config.watchlist:
             logger.info("Subscribing to %s", ticker)
             self.market_data.subscribe(ticker)
 
-        logger.info("Engine started. Streaming market data.")
+        logger.info("Engine started. %s",
+                     "Polling historical data." if self.market_data._use_polling
+                     else "Streaming market data.")
 
     def stop(self) -> None:
         logger.info("Shutting down engine.")
@@ -57,6 +64,8 @@ class Engine:
     def sleep(self, seconds: float = 0.1) -> None:
         """Process pending events (non-blocking tick)."""
         self.market_data.sleep(seconds)
+        # Poll for new data if in polling mode
+        self.market_data.poll_updates()
 
     def _on_bar(self, ticker: str, bars: list[Bar]) -> None:
         """Called when a new bar arrives for a ticker."""

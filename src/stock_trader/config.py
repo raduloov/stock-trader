@@ -15,6 +15,7 @@ class IbkrConfig:
 class MarketDataConfig:
     bar_size: str = "5 secs"
     history_window: int = 100
+    poll_interval: int = 30  # seconds between polls (polling mode only)
 
 
 @dataclass

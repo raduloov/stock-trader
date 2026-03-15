@@ -217,5 +217,9 @@ class TradingCLI:
 
         with Live(self._build_display(), refresh_per_second=2, console=self.console) as live:
             while self._running:
-                self.engine.sleep(0.5)
+                try:
+                    self.engine.sleep(0.5)
+                except (ConnectionError, OSError):
+                    self._running = False
+                    break
                 live.update(self._build_display())
