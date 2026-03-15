@@ -70,7 +70,7 @@ class BacktestEngine:
             for attempt in range(3):
                 ib_bars = self.ib.reqHistoricalData(
                     contract,
-                    endDateTime=f"{self.date} 23:59:59 US/Eastern",
+                    endDateTime=f"{self.date.replace('-', '')} 23:59:59 US/Eastern",
                     durationStr="1 D",
                     barSizeSetting="1 min",
                     whatToShow="TRADES",
