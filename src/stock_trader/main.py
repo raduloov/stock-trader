@@ -60,9 +60,14 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Log to file so screen=True doesn't hide errors
+    log_handlers = [logging.FileHandler("stock-trader.log", mode="w")]
+    if args.verbose:
+        log_handlers.append(logging.StreamHandler())
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=log_handlers,
     )
 
     if not args.config.exists():

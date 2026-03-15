@@ -148,15 +148,15 @@ Respond with ONLY valid JSON (no markdown, no explanation outside JSON):
         )
 
     except anthropic.APIError as e:
-        logger.error("Claude API error: %s", e)
+        logger.error("Claude API error for %s: %s", indicators.ticker, e)
         return Signal(
             ticker=indicators.ticker,
             action="HOLD",
             confidence=0.0,
-            reason=f"AI error: {e}",
+            reason=f"AI error: {type(e).__name__}: {str(e)[:60]}",
         )
     except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error("Failed to parse AI response: %s", e)
+        logger.error("Failed to parse AI response for %s: %s", indicators.ticker, e)
         return Signal(
             ticker=indicators.ticker,
             action="HOLD",
