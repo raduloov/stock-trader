@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Rate limit: don't call the API more than once per ticker per N seconds
 _MIN_INTERVAL = 10
 _last_call: dict[str, float] = {}
+# In backtest mode, rate limit by bar count instead of wall clock
+_last_bar_count: dict[str, int] = {}
+_BAR_INTERVAL = 30  # analyze every 30 bars in backtest (~30 minutes of 1-min bars)
 
 
 def evaluate_ai(
@@ -26,6 +29,7 @@ def evaluate_ai(
     bars: list[Bar],
     config: StrategyConfig,
     positions: dict[str, Any] | None = None,
+    backtest: bool = False,
 ) -> Signal:
     """Use Claude to analyze market data and produce a trading signal."""
 
@@ -39,16 +43,28 @@ def evaluate_ai(
         )
 
     # Rate limit — don't spam the API
-    now = time.time()
-    last = _last_call.get(indicators.ticker, 0)
-    if now - last < _MIN_INTERVAL:
-        return Signal(
-            ticker=indicators.ticker,
-            action="HOLD",
-            confidence=0.0,
-            reason="Waiting for next analysis window",
-        )
-    _last_call[indicators.ticker] = now
+    if backtest:
+        bar_count = len(bars)
+        last_count = _last_bar_count.get(indicators.ticker, 0)
+        if bar_count - last_count < _BAR_INTERVAL:
+            return Signal(
+                ticker=indicators.ticker,
+                action="HOLD",
+                confidence=0.0,
+                reason="Waiting for next analysis window",
+            )
+        _last_bar_count[indicators.ticker] = bar_count
+    else:
+        now = time.time()
+        last = _last_call.get(indicators.ticker, 0)
+        if now - last < _MIN_INTERVAL:
+            return Signal(
+                ticker=indicators.ticker,
+                action="HOLD",
+                confidence=0.0,
+                reason="Waiting for next analysis window",
+            )
+        _last_call[indicators.ticker] = now
 
     # Build market context for Claude
     recent_bars = bars[-20:]

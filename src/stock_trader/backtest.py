@@ -158,7 +158,7 @@ class BacktestEngine:
 
         indicators = compute_indicators(ticker, bars, self.config.analysis)
         if self.strategy_mode == "ai":
-            signal = evaluate_ai(indicators, bars, self.config.strategy, self.execution.positions)
+            signal = evaluate_ai(indicators, bars, self.config.strategy, self.execution.positions, backtest=True)
         else:
             signal = evaluate(indicators, self.config.strategy)
 
