@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stock-trader"
+version = "0.1.0"
+description = "Day trading bot with IBKR integration"
+requires-python = ">=3.12"
+dependencies = [
+    "ib_insync>=0.9.86",
+    "pandas>=2.2.0",
+    "pandas_ta>=0.3.14b1",
+    "rich>=13.7.0",
+    "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+stock-trader = "stock_trader.main:main"
