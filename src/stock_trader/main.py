@@ -77,6 +77,12 @@ def main() -> None:
         metavar="DATE",
         help="End date for bulk test (e.g., 2026-03-14)",
     )
+    parser.add_argument(
+        "--strategies",
+        type=str,
+        metavar="NAMES",
+        help="Comma-separated strategy names for bulk test (e.g., Conservative,Aggressive)",
+    )
     args = parser.parse_args()
 
     # Log to file so screen=True doesn't hide errors
@@ -107,7 +113,8 @@ def main() -> None:
             print("Error: --bulk-test requires --from and --to dates")
             print("Example: stock-trader --bulk-test --from 2026-02-14 --to 2026-03-14")
             sys.exit(1)
-        _run_bulk_test(config, args.from_date, args.to_date)
+        strategy_filter = args.strategies.split(",") if args.strategies else None
+        _run_bulk_test(config, args.from_date, args.to_date, strategy_filter)
     elif args.backtest:
         if args.aggressive and args.strategy == "classic":
             config.strategy.rsi_oversold = 45
@@ -118,11 +125,11 @@ def main() -> None:
         _run_live(config, args.strategy)
 
 
-def _run_bulk_test(config, from_date: str, to_date: str) -> None:
+def _run_bulk_test(config, from_date: str, to_date: str, strategy_filter: list[str] | None = None) -> None:
     from stock_trader.bulk_backtest import run_bulk_backtest, print_results
 
     try:
-        results = run_bulk_backtest(config, from_date, to_date)
+        results = run_bulk_backtest(config, from_date, to_date, strategy_filter)
         print_results(results)
     except ConnectionRefusedError:
         print(f"\nCould not connect to IBKR at {config.ibkr.host}:{config.ibkr.port}")

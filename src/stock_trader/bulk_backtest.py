@@ -287,16 +287,24 @@ def _run_strategy_on_day(
     )
 
 
-def run_bulk_backtest(config: Config, start_date: str, end_date: str) -> list[StrategyResult]:
-    """Run all strategies across all dates and return results."""
+def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_filter: list[str] | None = None) -> list[StrategyResult]:
+    """Run strategies across all dates and return results. Optionally filter by name."""
     dates = _get_trading_dates(start_date, end_date)
     if not dates:
         print("No trading days in the specified range.")
         return []
 
+    # Filter strategies
+    strategies = STRATEGIES
+    if strategy_filter:
+        strategies = {k: v for k, v in STRATEGIES.items() if k in strategy_filter}
+        if not strategies:
+            print(f"No matching strategies. Available: {', '.join(STRATEGIES.keys())}")
+            return []
+
     print(f"Bulk Backtest: {start_date} to {end_date} ({len(dates)} trading days)")
     print(f"Tickers: {', '.join(config.watchlist)}")
-    print(f"Strategies: {', '.join(STRATEGIES.keys())}")
+    print(f"Strategies: {', '.join(strategies.keys())}")
     print()
 
     # Fetch all data upfront
@@ -308,11 +316,11 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str) -> list[St
         print("No data available for any trading day in range.")
         return []
 
-    print(f"\nRunning {len(STRATEGIES)} strategies across {len(valid_dates)} days...")
+    print(f"\nRunning {len(strategies)} strategies across {len(valid_dates)} days...")
     print()
 
     results = []
-    for strat_name, strat_config in STRATEGIES.items():
+    for strat_name, strat_config in strategies.items():
         print(f"  {strat_name}...", end=" ", flush=True)
         strat_result = StrategyResult(name=strat_name)
 
