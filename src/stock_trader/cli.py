@@ -327,7 +327,8 @@ class TradingCLI:
         try:
             tty.setcbreak(sys.stdin.fileno())
 
-            with Live(self._build_display(), refresh_per_second=2, console=self.console, screen=True) as live:
+            with Live(self._build_display(), refresh_per_second=1, console=self.console, screen=True, transient=True) as live:
+                update_counter = 0
                 while self._running:
                     try:
                         self.engine.sleep(0.1)
@@ -339,6 +340,10 @@ class TradingCLI:
                     if key:
                         self._handle_key(key)
 
-                    live.update(self._build_display())
+                    # Only rebuild display every 5 ticks (~0.5s) to reduce flicker
+                    update_counter += 1
+                    if update_counter >= 5 or key:
+                        update_counter = 0
+                        live.update(self._build_display())
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
