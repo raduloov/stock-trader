@@ -1,0 +1,338 @@
+"""
+Bulk backtester: runs multiple strategies across multiple dates,
+collects results, and outputs a comparison summary.
+
+Usage: stock-trader --bulk-test --from 2026-02-14 --to 2026-03-14
+"""
+import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+
+from ib_insync import IB, Stock
+
+from stock_trader.analysis import compute_indicators
+from stock_trader.config import Config, StrategyConfig, RiskConfig, TickerConfig
+from stock_trader.execution import ExecutionManager
+from stock_trader.models import Bar, Signal
+from stock_trader.strategy import evaluate
+
+logger = logging.getLogger(__name__)
+
+
+STRATEGIES = {
+    "Conservative": StrategyConfig(
+        confidence_threshold=0.6,
+        rsi_oversold=30,
+        rsi_overbought=70,
+        stop_loss_pct=2.0,
+    ),
+    "Aggressive": StrategyConfig(
+        confidence_threshold=0.3,
+        rsi_oversold=45,
+        rsi_overbought=55,
+        stop_loss_pct=2.0,
+    ),
+    "Momentum": StrategyConfig(
+        confidence_threshold=0.5,
+        rsi_oversold=40,
+        rsi_overbought=60,
+        stop_loss_pct=1.0,
+    ),
+    "Wide": StrategyConfig(
+        confidence_threshold=0.4,
+        rsi_oversold=35,
+        rsi_overbought=65,
+        stop_loss_pct=3.0,
+    ),
+}
+
+
+@dataclass
+class DayResult:
+    date: str
+    pnl: float
+    trades: int
+    wins: int
+    losses: int
+
+
+@dataclass
+class StrategyResult:
+    name: str
+    days: list[DayResult] = field(default_factory=list)
+
+    @property
+    def total_pnl(self) -> float:
+        return sum(d.pnl for d in self.days)
+
+    @property
+    def total_trades(self) -> int:
+        return sum(d.trades for d in self.days)
+
+    @property
+    def total_wins(self) -> int:
+        return sum(d.wins for d in self.days)
+
+    @property
+    def total_losses(self) -> int:
+        return sum(d.losses for d in self.days)
+
+    @property
+    def win_rate(self) -> float:
+        total = self.total_wins + self.total_losses
+        return (self.total_wins / total * 100) if total > 0 else 0
+
+    @property
+    def avg_pnl_per_trade(self) -> float:
+        return (self.total_pnl / self.total_trades) if self.total_trades > 0 else 0
+
+    @property
+    def max_drawdown(self) -> float:
+        return min((d.pnl for d in self.days), default=0)
+
+    @property
+    def profitable_days(self) -> int:
+        return sum(1 for d in self.days if d.pnl > 0)
+
+
+def _get_trading_dates(start: str, end: str) -> list[str]:
+    """Generate weekday dates between start and end (inclusive)."""
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt = datetime.strptime(end, "%Y-%m-%d")
+    dates = []
+    current = start_dt
+    while current <= end_dt:
+        if current.weekday() < 5:  # Mon-Fri
+            dates.append(current.strftime("%Y-%m-%d"))
+        current += timedelta(days=1)
+    return dates
+
+
+def _fetch_all_data(
+    config: Config,
+    dates: list[str],
+) -> dict[str, dict[str, list[Bar]]]:
+    """Fetch historical data for all tickers and dates. Returns {date: {ticker: [bars]}}."""
+    print("Connecting to IBKR to fetch historical data...")
+    ib = IB()
+    ib.connect(
+        host=config.ibkr.host,
+        port=config.ibkr.port,
+        clientId=config.ibkr.client_id,
+    )
+    ib.reqMarketDataType(3)
+
+    # Qualify all contracts first
+    contracts = {}
+    for tc in config.tickers:
+        contract = Stock(tc.symbol, tc.exchange, tc.currency)
+        ib.qualifyContracts(contract)
+        contracts[tc.symbol] = contract
+
+    all_data: dict[str, dict[str, list[Bar]]] = {}
+    total = len(dates) * len(config.watchlist)
+    count = 0
+
+    for date in dates:
+        all_data[date] = {}
+        date_fmt = date.replace("-", "")
+
+        for ticker in config.watchlist:
+            count += 1
+            print(f"\r  Fetching data: {count}/{total} ({ticker} {date})...", end="", flush=True)
+
+            contract = contracts.get(ticker)
+            if not contract:
+                continue
+
+            ib_bars = None
+            for attempt in range(3):
+                ib_bars = ib.reqHistoricalData(
+                    contract,
+                    endDateTime=f"{date_fmt} 23:59:59 US/Eastern",
+                    durationStr="1 D",
+                    barSizeSetting="1 min",
+                    whatToShow="TRADES",
+                    useRTH=True,
+                    formatDate=1,
+                )
+                if ib_bars:
+                    break
+                ib.sleep(1)
+
+            if ib_bars:
+                all_data[date][ticker] = [
+                    Bar(
+                        timestamp=datetime.fromisoformat(str(b.date)),
+                        open=b.open,
+                        high=b.high,
+                        low=b.low,
+                        close=b.close,
+                        volume=int(b.volume),
+                    )
+                    for b in ib_bars
+                ]
+            else:
+                all_data[date][ticker] = []
+
+    print(f"\r  Fetched data for {len(dates)} dates, {len(config.watchlist)} tickers.     ")
+    ib.disconnect()
+    return all_data
+
+
+def _run_strategy_on_day(
+    strategy_config: StrategyConfig,
+    risk_config: RiskConfig,
+    analysis_config,
+    ticker_bars: dict[str, list[Bar]],
+) -> DayResult:
+    """Run a strategy on one day's data and return results."""
+    execution = ExecutionManager(config=risk_config, place_order_fn=None)
+
+    for ticker, all_bars in ticker_bars.items():
+        if not all_bars:
+            continue
+
+        # Replay bars one at a time
+        for i in range(20, len(all_bars)):  # start at 20 so indicators have data
+            bars = all_bars[:i + 1]
+            indicators = compute_indicators(ticker, bars, analysis_config)
+            signal = evaluate(indicators, strategy_config)
+
+            # Check stop losses
+            current_prices = {}
+            for t, pos in execution.positions.items():
+                t_bars = ticker_bars.get(t, [])
+                if t_bars and i < len(t_bars):
+                    current_prices[t] = t_bars[i].close
+                elif t_bars:
+                    current_prices[t] = t_bars[-1].close
+
+            stop_signals = execution.check_stop_losses(
+                current_prices, strategy_config.stop_loss_pct
+            )
+            for stop_signal in stop_signals:
+                if stop_signal.ticker in current_prices:
+                    execution.process_signal(stop_signal, current_prices[stop_signal.ticker])
+
+            if signal.is_actionable(strategy_config.confidence_threshold):
+                execution.process_signal(signal, bars[-1].close)
+
+    # Count wins/losses from completed round-trip trades
+    wins = 0
+    losses = 0
+    # Pair up trades: each close after an open is a round trip
+    open_trades = {}
+    for trade in execution.trades:
+        if trade.action in ("BUY", "SHORT"):
+            open_trades[trade.ticker] = trade
+        elif trade.action in ("SELL", "BUY") and trade.ticker in open_trades:
+            open_trade = open_trades.pop(trade.ticker)
+            if open_trade.action == "BUY":
+                pnl = (trade.price - open_trade.price) * trade.quantity
+            else:  # SHORT closed by BUY
+                pnl = (open_trade.price - trade.price) * trade.quantity
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+
+    return DayResult(
+        date="",
+        pnl=execution.daily_pnl,
+        trades=len(execution.trades),
+        wins=wins,
+        losses=losses,
+    )
+
+
+def run_bulk_backtest(config: Config, start_date: str, end_date: str) -> list[StrategyResult]:
+    """Run all strategies across all dates and return results."""
+    dates = _get_trading_dates(start_date, end_date)
+    if not dates:
+        print("No trading days in the specified range.")
+        return []
+
+    print(f"Bulk Backtest: {start_date} to {end_date} ({len(dates)} trading days)")
+    print(f"Tickers: {', '.join(config.watchlist)}")
+    print(f"Strategies: {', '.join(STRATEGIES.keys())}")
+    print()
+
+    # Fetch all data upfront
+    all_data = _fetch_all_data(config, dates)
+
+    # Filter out dates with no data
+    valid_dates = [d for d in dates if any(all_data[d].get(t) for t in config.watchlist)]
+    if not valid_dates:
+        print("No data available for any trading day in range.")
+        return []
+
+    print(f"\nRunning {len(STRATEGIES)} strategies across {len(valid_dates)} days...")
+    print()
+
+    results = []
+    for strat_name, strat_config in STRATEGIES.items():
+        print(f"  {strat_name}...", end=" ", flush=True)
+        strat_result = StrategyResult(name=strat_name)
+
+        for date in valid_dates:
+            ticker_bars = all_data[date]
+            day_result = _run_strategy_on_day(
+                strat_config, config.risk, config.analysis, ticker_bars
+            )
+            day_result.date = date
+            strat_result.days.append(day_result)
+
+        print(f"done ({strat_result.total_trades} trades, ${strat_result.total_pnl:+.2f})")
+        results.append(strat_result)
+
+    return results
+
+
+def print_results(results: list[StrategyResult]) -> None:
+    """Print a formatted comparison table."""
+    if not results:
+        return
+
+    days_count = len(results[0].days) if results else 0
+
+    print()
+    print("=" * 90)
+    print(f"  STRATEGY COMPARISON — {days_count} trading days")
+    print("=" * 90)
+    print()
+    print(f"  {'Strategy':<16} {'Total P/L':>10} {'Win Rate':>10} {'Trades':>8} "
+          f"{'Avg P/L':>10} {'Max DD':>10} {'Prof Days':>10}")
+    print(f"  {'-'*14:<16} {'-'*10:>10} {'-'*10:>10} {'-'*8:>8} "
+          f"{'-'*10:>10} {'-'*10:>10} {'-'*10:>10}")
+
+    # Sort by total P/L descending
+    sorted_results = sorted(results, key=lambda r: r.total_pnl, reverse=True)
+
+    for r in sorted_results:
+        pnl_str = f"${r.total_pnl:+.2f}"
+        wr_str = f"{r.win_rate:.0f}%"
+        avg_str = f"${r.avg_pnl_per_trade:+.2f}"
+        dd_str = f"${r.max_drawdown:+.2f}"
+        prof_str = f"{r.profitable_days}/{len(r.days)}"
+
+        print(f"  {r.name:<16} {pnl_str:>10} {wr_str:>10} {r.total_trades:>8} "
+              f"{avg_str:>10} {dd_str:>10} {prof_str:>10}")
+
+    print()
+
+    # Best strategy
+    best = sorted_results[0]
+    print(f"  Best strategy: {best.name} (${best.total_pnl:+.2f}, {best.win_rate:.0f}% win rate)")
+    print()
+
+    # Per-day breakdown for best strategy
+    print(f"  Daily P/L for {best.name}:")
+    for day in best.days:
+        bar = "+" * int(max(day.pnl, 0) / 5) if day.pnl >= 0 else "-" * int(abs(min(day.pnl, 0)) / 5)
+        color_start = "\033[32m" if day.pnl >= 0 else "\033[31m"
+        color_end = "\033[0m"
+        print(f"    {day.date}  {color_start}${day.pnl:>+8.2f}{color_end}  "
+              f"{day.trades:>2} trades  {bar}")
+    print()

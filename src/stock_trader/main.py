@@ -58,6 +58,25 @@ def main() -> None:
         default="classic",
         help="Strategy to use: 'classic' (indicator rules) or 'ai' (Claude-powered). Default: classic",
     )
+    parser.add_argument(
+        "--bulk-test",
+        action="store_true",
+        help="Run bulk backtests comparing multiple strategies across a date range",
+    )
+    parser.add_argument(
+        "--from",
+        type=str,
+        dest="from_date",
+        metavar="DATE",
+        help="Start date for bulk test (e.g., 2026-02-14)",
+    )
+    parser.add_argument(
+        "--to",
+        type=str,
+        dest="to_date",
+        metavar="DATE",
+        help="End date for bulk test (e.g., 2026-03-14)",
+    )
     args = parser.parse_args()
 
     # Log to file so screen=True doesn't hide errors
@@ -83,7 +102,13 @@ def main() -> None:
 
     config = load_config(args.config)
 
-    if args.backtest:
+    if args.bulk_test:
+        if not args.from_date or not args.to_date:
+            print("Error: --bulk-test requires --from and --to dates")
+            print("Example: stock-trader --bulk-test --from 2026-02-14 --to 2026-03-14")
+            sys.exit(1)
+        _run_bulk_test(config, args.from_date, args.to_date)
+    elif args.backtest:
         if args.aggressive and args.strategy == "classic":
             config.strategy.rsi_oversold = 45
             config.strategy.rsi_overbought = 55
@@ -91,6 +116,18 @@ def main() -> None:
         _run_backtest(config, args.backtest, args.speed, args.strategy)
     else:
         _run_live(config, args.strategy)
+
+
+def _run_bulk_test(config, from_date: str, to_date: str) -> None:
+    from stock_trader.bulk_backtest import run_bulk_backtest, print_results
+
+    try:
+        results = run_bulk_backtest(config, from_date, to_date)
+        print_results(results)
+    except ConnectionRefusedError:
+        print(f"\nCould not connect to IBKR at {config.ibkr.host}:{config.ibkr.port}")
+        print("IBKR connection is needed to fetch historical data.")
+        sys.exit(1)
 
 
 def _run_backtest(config, date: str, speed: float, strategy: str) -> None:
