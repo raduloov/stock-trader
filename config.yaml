@@ -9,7 +9,7 @@ watchlist:
 - SPY
 - O
 - symbol: SXR8
-  exchange: IBIS
+  exchange: IBIS2
   currency: EUR
 market_data:
   bar_size: 5 secs
@@ -24,9 +24,9 @@ analysis:
   bollinger_period: 20
   bollinger_std: 2
 strategy:
-  confidence_threshold: 0.6
-  rsi_oversold: 30
-  rsi_overbought: 70
+  confidence_threshold: 0.3
+  rsi_oversold: 45
+  rsi_overbought: 55
   stop_loss_pct: 2.0
 risk:
   max_position_value: 1000

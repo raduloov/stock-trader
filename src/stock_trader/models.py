@@ -43,8 +43,11 @@ class Position:
     ticker: str
     quantity: int
     entry_price: float
+    direction: str = "LONG"  # "LONG" or "SHORT"
 
     def unrealized_pnl(self, current_price: float) -> float:
+        if self.direction == "SHORT":
+            return (self.entry_price - current_price) * self.quantity
         return (current_price - self.entry_price) * self.quantity
 
 

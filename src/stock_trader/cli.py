@@ -93,6 +93,7 @@ class TradingCLI:
     def _build_positions_table(self) -> Table:
         table = Table(title="Positions", expand=True)
         table.add_column("Ticker", style="bold")
+        table.add_column("Dir", justify="center")
         table.add_column("Qty", justify="right")
         table.add_column("Entry", justify="right")
         table.add_column("Current", justify="right")
@@ -103,9 +104,11 @@ class TradingCLI:
             current = bars[-1].close if bars else pos.entry_price
             pnl = pos.unrealized_pnl(current)
             pnl_style = "green" if pnl >= 0 else "red"
+            dir_str = "[green]LONG[/green]" if pos.direction == "LONG" else "[red]SHORT[/red]"
 
             table.add_row(
                 ticker,
+                dir_str,
                 str(pos.quantity),
                 f"{pos.entry_price:.2f}",
                 f"{current:.2f}",
@@ -113,7 +116,7 @@ class TradingCLI:
             )
 
         if not self.engine.execution.positions:
-            table.add_row("[dim]No open positions[/dim]", "", "", "", "")
+            table.add_row("[dim]No open positions[/dim]", "", "", "", "", "")
 
         return table
 

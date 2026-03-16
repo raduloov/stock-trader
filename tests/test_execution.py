@@ -54,11 +54,45 @@ def test_execute_sell_closes_position():
     assert "AAPL" not in mgr.positions
 
 
-def test_execute_sell_ignored_without_position():
+def test_sell_without_position_opens_short():
     mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
     signal = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
     result = mgr.process_signal(signal, current_price=150.0)
-    assert result is None
+    assert result is not None
+    assert result.action == "SHORT"
+    assert "AAPL" in mgr.positions
+    assert mgr.positions["AAPL"].direction == "SHORT"
+
+
+def test_short_pnl_profit_when_price_drops():
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500), place_order_fn=None)
+    sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
+    mgr.process_signal(sell, current_price=150.0)  # short 10 shares
+    # Close short with a BUY
+    buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
+    mgr.process_signal(buy, current_price=145.0)  # profit = 10 * 5 = $50
+    assert mgr.daily_pnl == 50.0
+    assert "AAPL" not in mgr.positions
+
+
+def test_short_pnl_loss_when_price_rises():
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500), place_order_fn=None)
+    sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
+    mgr.process_signal(sell, current_price=150.0)  # short 10 shares
+    buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
+    mgr.process_signal(buy, current_price=155.0)  # loss = 10 * 5 = -$50
+    assert mgr.daily_pnl == -50.0
+
+
+def test_short_stop_loss():
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000), place_order_fn=None)
+    sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
+    mgr.process_signal(sell, current_price=100.0)  # short at 100
+    # Price rose 3% — should trigger stop-loss on short
+    signals = mgr.check_stop_losses(prices={"AAPL": 103.0}, stop_loss_pct=2.0)
+    assert len(signals) == 1
+    assert signals[0].action == "BUY"
+    assert "short" in signals[0].reason
 
 
 def test_daily_loss_limit_halts_trading():
