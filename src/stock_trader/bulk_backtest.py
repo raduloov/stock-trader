@@ -45,6 +45,30 @@ STRATEGIES = {
         rsi_overbought=65,
         stop_loss_pct=3.0,
     ),
+    "Scalper": StrategyConfig(
+        confidence_threshold=0.25,
+        rsi_oversold=48,
+        rsi_overbought=52,
+        stop_loss_pct=0.5,
+    ),
+    "Swing": StrategyConfig(
+        confidence_threshold=0.5,
+        rsi_oversold=35,
+        rsi_overbought=65,
+        stop_loss_pct=1.5,
+    ),
+    "TightStop": StrategyConfig(
+        confidence_threshold=0.3,
+        rsi_oversold=40,
+        rsi_overbought=60,
+        stop_loss_pct=0.3,
+    ),
+    "LooseStop": StrategyConfig(
+        confidence_threshold=0.3,
+        rsi_oversold=40,
+        rsi_overbought=60,
+        stop_loss_pct=5.0,
+    ),
 }
 
 
@@ -190,44 +214,60 @@ def _run_strategy_on_day(
     """Run a strategy on one day's data and return results."""
     execution = ExecutionManager(config=risk_config, place_order_fn=None)
 
-    for ticker, all_bars in ticker_bars.items():
-        if not all_bars:
-            continue
+    # Find max bar count across all tickers
+    max_bars = max((len(bars) for bars in ticker_bars.values() if bars), default=0)
+    tickers = [t for t, bars in ticker_bars.items() if bars]
 
-        # Replay bars one at a time
-        for i in range(20, len(all_bars)):  # start at 20 so indicators have data
+    # Interleave: process bar i across ALL tickers before moving to bar i+1
+    for i in range(20, max_bars):
+        # Check stop losses first
+        current_prices = {}
+        for ticker in tickers:
+            all_bars = ticker_bars[ticker]
+            if i < len(all_bars):
+                current_prices[ticker] = all_bars[i].close
+
+        stop_signals = execution.check_stop_losses(
+            current_prices, strategy_config.stop_loss_pct
+        )
+        for stop_signal in stop_signals:
+            if stop_signal.ticker in current_prices:
+                execution.process_signal(stop_signal, current_prices[stop_signal.ticker])
+
+        # Then evaluate strategy for each ticker
+        for ticker in tickers:
+            all_bars = ticker_bars[ticker]
+            if i >= len(all_bars):
+                continue
+
             bars = all_bars[:i + 1]
             indicators = compute_indicators(ticker, bars, analysis_config)
             signal = evaluate(indicators, strategy_config)
 
-            # Check stop losses
-            current_prices = {}
-            for t, pos in execution.positions.items():
-                t_bars = ticker_bars.get(t, [])
-                if t_bars and i < len(t_bars):
-                    current_prices[t] = t_bars[i].close
-                elif t_bars:
-                    current_prices[t] = t_bars[-1].close
-
-            stop_signals = execution.check_stop_losses(
-                current_prices, strategy_config.stop_loss_pct
-            )
-            for stop_signal in stop_signals:
-                if stop_signal.ticker in current_prices:
-                    execution.process_signal(stop_signal, current_prices[stop_signal.ticker])
-
             if signal.is_actionable(strategy_config.confidence_threshold):
                 execution.process_signal(signal, bars[-1].close)
 
-    # Count wins/losses from completed round-trip trades
+    # Force-close all open positions at end of day (day trading = no overnight)
+    for ticker in list(execution.positions.keys()):
+        pos = execution.positions[ticker]
+        all_bars = ticker_bars.get(ticker, [])
+        if not all_bars:
+            continue
+        close_price = all_bars[-1].close
+        if pos.direction == "LONG":
+            close_signal = Signal(ticker=ticker, action="SELL", confidence=1.0, reason="End of day close")
+        else:
+            close_signal = Signal(ticker=ticker, action="BUY", confidence=1.0, reason="End of day close")
+        execution.process_signal(close_signal, close_price)
+
+    # Count wins/losses from round-trip trades
     wins = 0
     losses = 0
-    # Pair up trades: each close after an open is a round trip
-    open_trades = {}
+    open_trades: dict[str, object] = {}
     for trade in execution.trades:
-        if trade.action in ("BUY", "SHORT"):
+        if trade.action in ("BUY", "SHORT") and trade.ticker not in open_trades:
             open_trades[trade.ticker] = trade
-        elif trade.action in ("SELL", "BUY") and trade.ticker in open_trades:
+        elif trade.ticker in open_trades:
             open_trade = open_trades.pop(trade.ticker)
             if open_trade.action == "BUY":
                 pnl = (trade.price - open_trade.price) * trade.quantity
