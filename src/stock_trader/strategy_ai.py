@@ -52,7 +52,7 @@ def _call_gemini(prompt: str) -> str:
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     # Try flash-lite first (higher free tier limits), fall back to flash
-    for model in ["gemini-2.0-flash-lite", "gemini-2.0-flash"]:
+    for model in ["gemini-2.5-flash-preview-05-20", "gemini-2.0-flash-lite"]:
         try:
             response = client.models.generate_content(
                 model=model,
