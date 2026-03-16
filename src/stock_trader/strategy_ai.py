@@ -51,11 +51,20 @@ def _call_gemini(prompt: str) -> str:
     from google import genai
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-    )
-    return response.text.strip()
+    # Try flash-lite first (higher free tier limits), fall back to flash
+    for model in ["gemini-2.0-flash-lite", "gemini-2.0-flash"]:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+            return response.text.strip()
+        except Exception as e:
+            if "429" in str(e) and model == "gemini-2.0-flash-lite":
+                time.sleep(2)
+                continue
+            raise
+    return '{"action": "HOLD", "confidence": 0, "reason": "API unavailable"}'
 
 
 def _call_claude(prompt: str) -> str:
