@@ -1,15 +1,18 @@
 """
-AI-powered trading strategy using Claude to analyze market data
+AI-powered trading strategy using LLMs to analyze market data
 and make trading decisions.
 
-Requires ANTHROPIC_API_KEY environment variable to be set.
+Supports:
+- Gemini (free tier): set GEMINI_API_KEY env var
+- Claude: set ANTHROPIC_API_KEY env var
+
+Uses Gemini by default (free). Falls back to Claude if only ANTHROPIC_API_KEY is set.
 """
 import json
 import logging
+import os
 import time
 from typing import Any
-
-import anthropic
 
 from stock_trader.config import StrategyConfig
 from stock_trader.models import Bar, IndicatorResult, Signal
@@ -24,6 +27,59 @@ _last_bar_count: dict[str, int] = {}
 _BAR_INTERVAL = 30  # analyze every 30 bars in backtest (~30 minutes of 1-min bars)
 
 
+def _build_prompt(market_data: dict) -> str:
+    return f"""You are a day trading analyst. Analyze this market data and decide whether to BUY, SELL, or HOLD.
+
+MARKET DATA:
+{json.dumps(market_data, indent=2)}
+
+RULES:
+- You are day trading (positions opened and closed same day)
+- Only recommend BUY if you see a clear entry opportunity
+- Only recommend SELL if we currently hold this stock (currently_holding=true) and should exit
+- If we don't hold the stock, SELL means "don't buy / avoid"
+- HOLD means no action needed right now
+- Be decisive — avoid HOLD if there's a clear signal
+- Consider: trend direction, momentum, support/resistance levels, volume
+
+Respond with ONLY valid JSON (no markdown, no explanation outside JSON):
+{{"action": "BUY"|"SELL"|"HOLD", "confidence": 0.0-1.0, "reason": "brief explanation"}}"""
+
+
+def _call_gemini(prompt: str) -> str:
+    """Call Google Gemini API."""
+    from google import genai
+
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+    )
+    return response.text.strip()
+
+
+def _call_claude(prompt: str) -> str:
+    """Call Anthropic Claude API."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=150,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
+
+
+def _get_provider() -> str:
+    """Determine which AI provider to use based on available keys."""
+    if os.environ.get("GEMINI_API_KEY"):
+        return "gemini"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "claude"
+    return "none"
+
+
 def evaluate_ai(
     indicators: IndicatorResult,
     bars: list[Bar],
@@ -31,7 +87,7 @@ def evaluate_ai(
     positions: dict[str, Any] | None = None,
     backtest: bool = False,
 ) -> Signal:
-    """Use Claude to analyze market data and produce a trading signal."""
+    """Use an LLM to analyze market data and produce a trading signal."""
 
     # Skip if insufficient data
     if indicators.close is None or len(bars) < 20:
@@ -66,7 +122,7 @@ def evaluate_ai(
             )
         _last_call[indicators.ticker] = now
 
-    # Build market context for Claude
+    # Build market context
     recent_bars = bars[-20:]
     prices = [b.close for b in recent_bars]
     volumes = [b.volume for b in recent_bars]
@@ -100,32 +156,29 @@ def evaluate_ai(
         "currently_holding": has_position,
     }
 
-    prompt = f"""You are a day trading analyst. Analyze this market data and decide whether to BUY, SELL, or HOLD.
-
-MARKET DATA:
-{json.dumps(market_data, indent=2)}
-
-RULES:
-- You are day trading (positions opened and closed same day)
-- Only recommend BUY if you see a clear entry opportunity
-- Only recommend SELL if we currently hold this stock (currently_holding=true) and should exit
-- If we don't hold the stock, SELL means "don't buy / avoid"
-- HOLD means no action needed right now
-- Be decisive — avoid HOLD if there's a clear signal
-- Consider: trend direction, momentum, support/resistance levels, volume
-
-Respond with ONLY valid JSON (no markdown, no explanation outside JSON):
-{{"action": "BUY"|"SELL"|"HOLD", "confidence": 0.0-1.0, "reason": "brief explanation"}}"""
+    prompt = _build_prompt(market_data)
+    provider = _get_provider()
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=150,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        if provider == "gemini":
+            text = _call_gemini(prompt)
+        elif provider == "claude":
+            text = _call_claude(prompt)
+        else:
+            return Signal(
+                ticker=indicators.ticker,
+                action="HOLD",
+                confidence=0.0,
+                reason="No AI API key configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY)",
+            )
 
-        text = response.content[0].text.strip()
+        # Clean response — strip markdown code fences if present
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
 
         # Parse JSON response
         result = json.loads(text)
@@ -138,7 +191,8 @@ Respond with ONLY valid JSON (no markdown, no explanation outside JSON):
             action = "HOLD"
             confidence = 0.0
 
-        logger.info("AI signal for %s: %s (%.0f%%) — %s", indicators.ticker, action, confidence * 100, reason)
+        logger.info("AI [%s] signal for %s: %s (%.0f%%) — %s",
+                     provider, indicators.ticker, action, confidence * 100, reason)
 
         return Signal(
             ticker=indicators.ticker,
@@ -147,19 +201,11 @@ Respond with ONLY valid JSON (no markdown, no explanation outside JSON):
             reason=f"AI: {reason}",
         )
 
-    except anthropic.APIError as e:
-        logger.error("Claude API error for %s: %s", indicators.ticker, e)
+    except Exception as e:
+        logger.error("AI [%s] error for %s: %s", provider, indicators.ticker, e)
         return Signal(
             ticker=indicators.ticker,
             action="HOLD",
             confidence=0.0,
             reason=f"AI error: {type(e).__name__}: {str(e)[:60]}",
-        )
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error("Failed to parse AI response for %s: %s", indicators.ticker, e)
-        return Signal(
-            ticker=indicators.ticker,
-            action="HOLD",
-            confidence=0.0,
-            reason=f"AI parse error: {e}",
         )

@@ -100,11 +100,13 @@ def main() -> None:
         sys.exit(1)
 
     if args.strategy == "ai":
-        import os
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            print("Error: ANTHROPIC_API_KEY environment variable is required for AI strategy.")
-            print("Set it with: export ANTHROPIC_API_KEY=your-key-here")
+        if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
+            print("Error: AI strategy requires GEMINI_API_KEY or ANTHROPIC_API_KEY.")
+            print("  Gemini (free): https://aistudio.google.com/apikey")
+            print("  Claude (paid): https://console.anthropic.com/settings/keys")
             sys.exit(1)
+        provider = "Gemini" if os.environ.get("GEMINI_API_KEY") else "Claude"
+        print(f"AI provider: {provider}")
 
     config = load_config(args.config)
 
