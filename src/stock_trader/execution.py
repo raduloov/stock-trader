@@ -19,6 +19,8 @@ class ExecutionManager:
         self.daily_pnl: float = 0.0
         self.is_halted: bool = False
         self.is_paused: bool = False
+        self.max_capital_used: float = 0.0
+        self._current_capital: float = 0.0
 
     def process_signal(self, signal: Signal, current_price: float) -> Trade | None:
         if self.is_halted or self.is_paused:
@@ -52,13 +54,15 @@ class ExecutionManager:
         if self.place_order_fn is not None:
             self.place_order_fn(signal.ticker, "BUY", quantity, price)
 
-        # Track position
+        # Track position and capital
         self.positions[signal.ticker] = Position(
             ticker=signal.ticker,
             quantity=quantity,
             entry_price=price,
             direction="LONG",
         )
+        self._current_capital += quantity * price
+        self.max_capital_used = max(self.max_capital_used, self._current_capital)
 
         trade = Trade(
             timestamp=datetime.now(),
@@ -93,9 +97,10 @@ class ExecutionManager:
         if self.place_order_fn is not None:
             self.place_order_fn(signal.ticker, order_action, position.quantity, price)
 
-        # Calculate P/L (minus commission)
+        # Calculate P/L (minus commission) and release capital
         pnl = position.unrealized_pnl(price)
         self.daily_pnl += pnl - self.config.commission_per_trade
+        self._current_capital -= position.quantity * position.entry_price
 
         trade = Trade(
             timestamp=datetime.now(),
@@ -132,6 +137,8 @@ class ExecutionManager:
             entry_price=price,
             direction="SHORT",
         )
+        self._current_capital += quantity * price  # margin requirement ~= position value
+        self.max_capital_used = max(self.max_capital_used, self._current_capital)
 
         trade = Trade(
             timestamp=datetime.now(),

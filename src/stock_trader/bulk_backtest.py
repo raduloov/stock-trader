@@ -80,6 +80,7 @@ class DayResult:
     trades: int
     wins: int
     losses: int
+    capital_used: float = 0.0  # max capital deployed at any point during the day
 
 
 @dataclass
@@ -115,6 +116,21 @@ class StrategyResult:
     @property
     def max_drawdown(self) -> float:
         return min((d.pnl for d in self.days), default=0)
+
+    @property
+    def max_capital_used(self) -> float:
+        return max((d.capital_used for d in self.days), default=0)
+
+    @property
+    def roi_pct(self) -> float:
+        """Return on investment as percentage of max capital deployed."""
+        if self.max_capital_used <= 0:
+            return 0
+        return self.total_pnl / self.max_capital_used * 100
+
+    @property
+    def total_commissions(self) -> float:
+        return self.total_trades * 1.0  # $1 per trade
 
     @property
     def profitable_days(self) -> int:
@@ -284,6 +300,7 @@ def _run_strategy_on_day(
         pnl=execution.daily_pnl,
         trades=len(execution.trades),
         wins=wins,
+        capital_used=execution.max_capital_used,
         losses=losses,
     )
 
@@ -356,7 +373,7 @@ def _run_bar_strategy_on_day(
             elif pnl < 0:
                 losses += 1
 
-    return DayResult(date="", pnl=execution.daily_pnl, trades=len(execution.trades), wins=wins, losses=losses)
+    return DayResult(date="", pnl=execution.daily_pnl, trades=len(execution.trades), wins=wins, losses=losses, capital_used=execution.max_capital_used)
 
 
 def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_filter: list[str] | None = None) -> list[StrategyResult]:
@@ -425,33 +442,39 @@ def print_results(results: list[StrategyResult]) -> None:
     days_count = len(results[0].days) if results else 0
 
     print()
-    print("=" * 90)
-    print(f"  STRATEGY COMPARISON — {days_count} trading days")
-    print("=" * 90)
+    print("=" * 110)
+    print(f"  STRATEGY COMPARISON — {days_count} trading days (incl. $1/trade commission)")
+    print("=" * 110)
     print()
-    print(f"  {'Strategy':<16} {'Total P/L':>10} {'Win Rate':>10} {'Trades':>8} "
-          f"{'Avg P/L':>10} {'Max DD':>10} {'Prof Days':>10}")
-    print(f"  {'-'*14:<16} {'-'*10:>10} {'-'*10:>10} {'-'*8:>8} "
-          f"{'-'*10:>10} {'-'*10:>10} {'-'*10:>10}")
+    print(f"  {'Strategy':<16} {'P/L':>10} {'Commiss.':>10} {'Net P/L':>10} {'ROI%':>8} "
+          f"{'WinRate':>8} {'Trades':>7} {'Capital':>10} {'Max DD':>10}")
+    print(f"  {'-'*14:<16} {'-'*10:>10} {'-'*10:>10} {'-'*10:>10} {'-'*8:>8} "
+          f"{'-'*8:>8} {'-'*7:>7} {'-'*10:>10} {'-'*10:>10}")
 
     # Sort by total P/L descending
     sorted_results = sorted(results, key=lambda r: r.total_pnl, reverse=True)
 
     for r in sorted_results:
-        pnl_str = f"${r.total_pnl:+.2f}"
+        gross_pnl = r.total_pnl + r.total_commissions  # add back commissions to get gross
+        comm_str = f"${r.total_commissions:,.0f}"
+        net_str = f"${r.total_pnl:+.2f}"
+        gross_str = f"${gross_pnl:+.2f}"
+        roi_str = f"{r.roi_pct:+.1f}%"
         wr_str = f"{r.win_rate:.0f}%"
-        avg_str = f"${r.avg_pnl_per_trade:+.2f}"
+        cap_str = f"${r.max_capital_used:,.0f}"
         dd_str = f"${r.max_drawdown:+.2f}"
-        prof_str = f"{r.profitable_days}/{len(r.days)}"
 
-        print(f"  {r.name:<16} {pnl_str:>10} {wr_str:>10} {r.total_trades:>8} "
-              f"{avg_str:>10} {dd_str:>10} {prof_str:>10}")
+        print(f"  {r.name:<16} {gross_str:>10} {comm_str:>10} {net_str:>10} {roi_str:>8} "
+              f"{wr_str:>8} {r.total_trades:>7} {cap_str:>10} {dd_str:>10}")
 
     print()
 
     # Best strategy
     best = sorted_results[0]
-    print(f"  Best strategy: {best.name} (${best.total_pnl:+.2f}, {best.win_rate:.0f}% win rate)")
+    print(f"  Best strategy: {best.name}")
+    print(f"    Net P/L: ${best.total_pnl:+.2f} | ROI: {best.roi_pct:+.1f}% | "
+          f"Capital used: ${best.max_capital_used:,.0f} | Win rate: {best.win_rate:.0f}%")
+    print(f"    Commissions: ${best.total_commissions:,.0f} ({best.total_trades} trades x $1)")
     print()
 
     # Per-day breakdown for best strategy
