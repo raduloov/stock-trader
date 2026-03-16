@@ -45,9 +45,10 @@ class Engine:
         # line to use streaming mode instead.
         self.market_data.enable_polling_mode()
 
-        for ticker in self.config.watchlist:
-            logger.info("Subscribing to %s", ticker)
-            self.market_data.subscribe(ticker)
+        for tc in self.config.tickers:
+            logger.info("Subscribing to %s (%s/%s)", tc.symbol, tc.exchange, tc.currency)
+            self.market_data.set_ticker_config(tc.symbol, tc)
+            self.market_data.subscribe(tc.symbol)
 
         logger.info("Engine started. %s",
                      "Polling historical data." if self.market_data._use_polling
@@ -109,7 +110,8 @@ class Engine:
     def _place_ibkr_order(self, ticker: str, action: str, quantity: int, price: float) -> None:
         """Place an order via IBKR. For paper trading, market orders are fine."""
         from ib_insync import Stock, MarketOrder
-        contract = Stock(ticker, "SMART", "USD")
+        tc = self.config.get_ticker(ticker)
+        contract = Stock(tc.symbol, tc.exchange, tc.currency)
         self.market_data.ib.qualifyContracts(contract)
         order = MarketOrder(action, quantity)
         self.market_data.ib.placeOrder(contract, order)
@@ -117,14 +119,17 @@ class Engine:
 
     def add_ticker(self, ticker: str) -> None:
         if ticker not in self.config.watchlist:
-            self.config.watchlist.append(ticker)
+            from stock_trader.config import TickerConfig
+            tc = TickerConfig(symbol=ticker)
+            self.config.tickers.append(tc)
+            self.market_data.set_ticker_config(ticker, tc)
             self.market_data.subscribe(ticker)
             save_config(self.config)
             logger.info("Added %s to watchlist", ticker)
 
     def remove_ticker(self, ticker: str) -> None:
         if ticker in self.config.watchlist:
-            self.config.watchlist.remove(ticker)
+            self.config.tickers = [t for t in self.config.tickers if t.symbol != ticker]
             self.market_data.unsubscribe(ticker)
             save_config(self.config)
             logger.info("Removed %s from watchlist", ticker)

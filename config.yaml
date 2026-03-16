@@ -8,6 +8,9 @@ watchlist:
 - NVDA
 - SPY
 - O
+- symbol: SXR8
+  exchange: IBIS
+  currency: EUR
 market_data:
   bar_size: 5 secs
   history_window: 100

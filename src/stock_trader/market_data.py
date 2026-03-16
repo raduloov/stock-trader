@@ -6,7 +6,7 @@ from typing import Callable
 
 from ib_insync import IB, Stock, RealTimeBarList
 
-from stock_trader.config import IbkrConfig, MarketDataConfig
+from stock_trader.config import IbkrConfig, MarketDataConfig, TickerConfig
 from stock_trader.models import Bar
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class MarketDataManager:
         self.ib = IB()
         self.bars: dict[str, list[Bar]] = defaultdict(list)
         self._contracts: dict[str, Stock] = {}
+        self._ticker_configs: dict[str, TickerConfig] = {}
         self._subscriptions: dict[str, RealTimeBarList] = {}
         self._use_polling = False
         self._last_poll: float = 0
@@ -49,8 +50,19 @@ class MarketDataManager:
             self.ib.disconnect()
         self._subscriptions.clear()
 
+    def _make_contract(self, ticker: str) -> Stock:
+        """Create an IBKR contract, using TickerConfig if available."""
+        tc = self._ticker_configs.get(ticker)
+        if tc:
+            return Stock(tc.symbol, tc.exchange, tc.currency)
+        return Stock(ticker, "SMART", "USD")
+
+    def set_ticker_config(self, ticker: str, config: TickerConfig) -> None:
+        """Store per-ticker exchange/currency config."""
+        self._ticker_configs[ticker] = config
+
     def subscribe(self, ticker: str) -> None:
-        contract = Stock(ticker, "SMART", "USD")
+        contract = self._make_contract(ticker)
         self.ib.qualifyContracts(contract)
         self._contracts[ticker] = contract
 
@@ -73,7 +85,7 @@ class MarketDataManager:
 
     def subscribe_polling(self, ticker: str) -> None:
         """Subscribe using historical data polling only."""
-        contract = Stock(ticker, "SMART", "USD")
+        contract = self._make_contract(ticker)
         self.ib.qualifyContracts(contract)
         self._contracts[ticker] = contract
         self._use_polling = True

@@ -65,7 +65,8 @@ class BacktestEngine:
 
         for ticker in self.config.watchlist:
             print(f"  Fetching {ticker}...", end=" ", flush=True)
-            contract = Stock(ticker, "SMART", "USD")
+            tc = self.config.get_ticker(ticker)
+            contract = Stock(tc.symbol, tc.exchange, tc.currency)
             self.ib.qualifyContracts(contract)
 
             # Retry up to 3 times — IBKR sometimes rejects first requests

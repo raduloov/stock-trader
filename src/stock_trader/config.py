@@ -5,6 +5,14 @@ import yaml
 
 
 @dataclass
+class TickerConfig:
+    """Config for a single ticker. US stocks only need the symbol."""
+    symbol: str
+    exchange: str = "SMART"
+    currency: str = "USD"
+
+
+@dataclass
 class IbkrConfig:
     host: str = "127.0.0.1"
     port: int = 7497
@@ -48,11 +56,44 @@ class RiskConfig:
 @dataclass
 class Config:
     ibkr: IbkrConfig = field(default_factory=IbkrConfig)
-    watchlist: list[str] = field(default_factory=lambda: ["SPY"])
+    tickers: list[TickerConfig] = field(default_factory=list)
     market_data: MarketDataConfig = field(default_factory=MarketDataConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+
+    @property
+    def watchlist(self) -> list[str]:
+        """Return list of ticker symbols for backward compatibility."""
+        return [t.symbol for t in self.tickers]
+
+    @watchlist.setter
+    def watchlist(self, symbols: list[str]) -> None:
+        """Set watchlist from plain symbols (keeps existing configs for known tickers)."""
+        existing = {t.symbol: t for t in self.tickers}
+        self.tickers = [existing.get(s, TickerConfig(symbol=s)) for s in symbols]
+
+    def get_ticker(self, symbol: str) -> TickerConfig:
+        """Get config for a specific ticker."""
+        for t in self.tickers:
+            if t.symbol == symbol:
+                return t
+        return TickerConfig(symbol=symbol)
+
+
+def _parse_watchlist(raw_list: list) -> list[TickerConfig]:
+    """Parse watchlist that can contain strings or dicts."""
+    tickers = []
+    for item in raw_list:
+        if isinstance(item, str):
+            tickers.append(TickerConfig(symbol=item))
+        elif isinstance(item, dict):
+            tickers.append(TickerConfig(
+                symbol=item["symbol"],
+                exchange=item.get("exchange", "SMART"),
+                currency=item.get("currency", "USD"),
+            ))
+    return tickers
 
 
 def load_config(path: Path) -> Config:
@@ -61,7 +102,7 @@ def load_config(path: Path) -> Config:
 
     config = Config(
         ibkr=IbkrConfig(**raw.get("ibkr", {})),
-        watchlist=raw.get("watchlist", ["SPY"]),
+        tickers=_parse_watchlist(raw.get("watchlist", ["SPY"])),
         market_data=MarketDataConfig(**raw.get("market_data", {})),
         analysis=AnalysisConfig(**raw.get("analysis", {})),
         strategy=StrategyConfig(**raw.get("strategy", {})),
@@ -79,8 +120,14 @@ def save_config(config: Config) -> None:
     if not path or not raw:
         return
 
-    # Update only the watchlist in the raw config (preserves comments/formatting order)
-    raw["watchlist"] = config.watchlist
+    # Serialize tickers — use plain strings for US stocks, dicts for others
+    watchlist = []
+    for t in config.tickers:
+        if t.exchange == "SMART" and t.currency == "USD":
+            watchlist.append(t.symbol)
+        else:
+            watchlist.append({"symbol": t.symbol, "exchange": t.exchange, "currency": t.currency})
+    raw["watchlist"] = watchlist
 
     with open(path, "w") as f:
         yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
