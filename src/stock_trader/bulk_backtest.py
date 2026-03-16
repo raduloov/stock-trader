@@ -128,9 +128,11 @@ class StrategyResult:
             return 0
         return self.total_pnl / self.max_capital_used * 100
 
+    commission_rate: float = 1.0
+
     @property
     def total_commissions(self) -> float:
-        return self.total_trades * 1.0  # $1 per trade
+        return self.total_trades * self.commission_rate
 
     @property
     def profitable_days(self) -> int:
@@ -417,7 +419,7 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_f
     results = []
     for strat_name, (strat_type, strat) in all_strategies.items():
         print(f"  {strat_name}...", end=" ", flush=True)
-        strat_result = StrategyResult(name=strat_name)
+        strat_result = StrategyResult(name=strat_name, commission_rate=config.risk.commission_per_trade)
 
         for date in valid_dates:
             ticker_bars = all_data[date]
@@ -443,7 +445,8 @@ def print_results(results: list[StrategyResult]) -> None:
 
     print()
     print("=" * 110)
-    print(f"  STRATEGY COMPARISON — {days_count} trading days (incl. $1/trade commission)")
+    comm_rate = results[0].commission_rate if results else 1.0
+    print(f"  STRATEGY COMPARISON — {days_count} trading days (incl. ${comm_rate:.2f}/trade commission)")
     print("=" * 110)
     print()
     print(f"  {'Strategy':<16} {'P/L':>10} {'Commiss.':>10} {'Net P/L':>10} {'ROI%':>8} "
@@ -474,7 +477,7 @@ def print_results(results: list[StrategyResult]) -> None:
     print(f"  Best strategy: {best.name}")
     print(f"    Net P/L: ${best.total_pnl:+.2f} | ROI: {best.roi_pct:+.1f}% | "
           f"Capital used: ${best.max_capital_used:,.0f} | Win rate: {best.win_rate:.0f}%")
-    print(f"    Commissions: ${best.total_commissions:,.0f} ({best.total_trades} trades x $1)")
+    print(f"    Commissions: ${best.total_commissions:,.2f} ({best.total_trades} trades x ${best.commission_rate:.2f})")
     print()
 
     # Per-day breakdown for best strategy

@@ -3,14 +3,7 @@ ibkr:
   port: 7497
   client_id: 20
 watchlist:
-- AAPL
-- TSLA
-- NVDA
-- SPY
-- O
-- symbol: SXR8
-  exchange: IBIS2
-  currency: EUR
+- QQQ
 market_data:
   bar_size: 5 secs
   history_window: 100
@@ -32,3 +25,4 @@ risk:
   max_position_value: 1000
   max_open_positions: 5
   daily_loss_limit: -500
+  commission_per_trade: 0.35
