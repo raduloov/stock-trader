@@ -16,6 +16,7 @@ from stock_trader.config import Config, StrategyConfig, RiskConfig, TickerConfig
 from stock_trader.execution import ExecutionManager
 from stock_trader.models import Bar, Signal
 from stock_trader.strategy import evaluate
+from stock_trader.strategies import STRATEGY_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +288,77 @@ def _run_strategy_on_day(
     )
 
 
+def _run_bar_strategy_on_day(
+    strategy_fn,
+    risk_config: RiskConfig,
+    ticker_bars: dict[str, list[Bar]],
+    stop_loss_pct: float = 2.0,
+) -> DayResult:
+    """Run a bar-based strategy (VWAP, EMA crossover, etc.) on one day's data."""
+    execution = ExecutionManager(config=risk_config, place_order_fn=None)
+
+    max_bars = max((len(bars) for bars in ticker_bars.values() if bars), default=0)
+    tickers = [t for t, bars in ticker_bars.items() if bars]
+
+    for i in range(20, max_bars):
+        # Check stop losses
+        current_prices = {}
+        for ticker in tickers:
+            all_bars = ticker_bars[ticker]
+            if i < len(all_bars):
+                current_prices[ticker] = all_bars[i].close
+
+        stop_signals = execution.check_stop_losses(current_prices, stop_loss_pct)
+        for stop_signal in stop_signals:
+            if stop_signal.ticker in current_prices:
+                execution.process_signal(stop_signal, current_prices[stop_signal.ticker])
+
+        # Evaluate strategy for each ticker
+        for ticker in tickers:
+            all_bars = ticker_bars[ticker]
+            if i >= len(all_bars):
+                continue
+
+            bars = all_bars[:i + 1]
+            signal = strategy_fn(ticker, bars, execution.positions)
+
+            if signal.is_actionable(0.4):  # threshold for bar-based strategies
+                execution.process_signal(signal, bars[-1].close)
+
+    # Force-close at end of day
+    for ticker in list(execution.positions.keys()):
+        pos = execution.positions[ticker]
+        all_bars = ticker_bars.get(ticker, [])
+        if not all_bars:
+            continue
+        close_price = all_bars[-1].close
+        if pos.direction == "LONG":
+            close_signal = Signal(ticker=ticker, action="SELL", confidence=1.0, reason="End of day close")
+        else:
+            close_signal = Signal(ticker=ticker, action="BUY", confidence=1.0, reason="End of day close")
+        execution.process_signal(close_signal, close_price)
+
+    # Count wins/losses
+    wins = 0
+    losses = 0
+    open_trades: dict[str, object] = {}
+    for trade in execution.trades:
+        if trade.action in ("BUY", "SHORT") and trade.ticker not in open_trades:
+            open_trades[trade.ticker] = trade
+        elif trade.ticker in open_trades:
+            open_trade = open_trades.pop(trade.ticker)
+            if open_trade.action == "BUY":
+                pnl = (trade.price - open_trade.price) * trade.quantity
+            else:
+                pnl = (open_trade.price - trade.price) * trade.quantity
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+
+    return DayResult(date="", pnl=execution.daily_pnl, trades=len(execution.trades), wins=wins, losses=losses)
+
+
 def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_filter: list[str] | None = None) -> list[StrategyResult]:
     """Run strategies across all dates and return results. Optionally filter by name."""
     dates = _get_trading_dates(start_date, end_date)
@@ -294,41 +366,48 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_f
         print("No trading days in the specified range.")
         return []
 
-    # Filter strategies
-    strategies = STRATEGIES
+    # Build combined strategy list: indicator-based + bar-based
+    all_strategies = {}
+    for name, strat_config in STRATEGIES.items():
+        all_strategies[name] = ("indicator", strat_config)
+    for name, strat_fn in STRATEGY_REGISTRY.items():
+        display_name = name.replace("_", " ").title()
+        all_strategies[display_name] = ("bar", strat_fn)
+
     if strategy_filter:
-        strategies = {k: v for k, v in STRATEGIES.items() if k in strategy_filter}
-        if not strategies:
-            print(f"No matching strategies. Available: {', '.join(STRATEGIES.keys())}")
+        all_strategies = {k: v for k, v in all_strategies.items() if k in strategy_filter}
+        if not all_strategies:
+            available = list(STRATEGIES.keys()) + [n.replace("_", " ").title() for n in STRATEGY_REGISTRY.keys()]
+            print(f"No matching strategies. Available: {', '.join(available)}")
             return []
 
     print(f"Bulk Backtest: {start_date} to {end_date} ({len(dates)} trading days)")
     print(f"Tickers: {', '.join(config.watchlist)}")
-    print(f"Strategies: {', '.join(strategies.keys())}")
+    print(f"Strategies: {', '.join(all_strategies.keys())}")
     print()
 
     # Fetch all data upfront
     all_data = _fetch_all_data(config, dates)
 
-    # Filter out dates with no data
     valid_dates = [d for d in dates if any(all_data[d].get(t) for t in config.watchlist)]
     if not valid_dates:
         print("No data available for any trading day in range.")
         return []
 
-    print(f"\nRunning {len(strategies)} strategies across {len(valid_dates)} days...")
+    print(f"\nRunning {len(all_strategies)} strategies across {len(valid_dates)} days...")
     print()
 
     results = []
-    for strat_name, strat_config in strategies.items():
+    for strat_name, (strat_type, strat) in all_strategies.items():
         print(f"  {strat_name}...", end=" ", flush=True)
         strat_result = StrategyResult(name=strat_name)
 
         for date in valid_dates:
             ticker_bars = all_data[date]
-            day_result = _run_strategy_on_day(
-                strat_config, config.risk, config.analysis, ticker_bars
-            )
+            if strat_type == "indicator":
+                day_result = _run_strategy_on_day(strat, config.risk, config.analysis, ticker_bars)
+            else:
+                day_result = _run_bar_strategy_on_day(strat, config.risk, ticker_bars)
             day_result.date = date
             strat_result.days.append(day_result)
 
