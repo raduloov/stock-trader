@@ -69,6 +69,7 @@ class ExecutionManager:
             reason=signal.reason,
         )
         self.trades.append(trade)
+        self.daily_pnl -= self.config.commission_per_trade
         return trade
 
     def _handle_sell(self, signal: Signal, price: float) -> Trade | None:
@@ -92,9 +93,9 @@ class ExecutionManager:
         if self.place_order_fn is not None:
             self.place_order_fn(signal.ticker, order_action, position.quantity, price)
 
-        # Calculate P/L
+        # Calculate P/L (minus commission)
         pnl = position.unrealized_pnl(price)
-        self.daily_pnl += pnl
+        self.daily_pnl += pnl - self.config.commission_per_trade
 
         trade = Trade(
             timestamp=datetime.now(),
@@ -141,6 +142,7 @@ class ExecutionManager:
             reason=signal.reason,
         )
         self.trades.append(trade)
+        self.daily_pnl -= self.config.commission_per_trade
         return trade
 
     def check_stop_losses(self, prices: dict[str, float], stop_loss_pct: float) -> list[Signal]:

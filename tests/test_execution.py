@@ -5,7 +5,7 @@ from stock_trader.execution import ExecutionManager
 
 
 def test_execute_buy_creates_position():
-    mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(commission_per_trade=0), place_order_fn=None)
     signal = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     result = mgr.process_signal(signal, current_price=150.0)
     assert result is not None
@@ -23,7 +23,7 @@ def test_execute_buy_respects_max_position_value():
 
 
 def test_execute_buy_blocked_by_existing_position():
-    mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(commission_per_trade=0), place_order_fn=None)
     signal = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(signal, current_price=150.0)
     # Second buy on same ticker should be blocked
@@ -32,7 +32,7 @@ def test_execute_buy_blocked_by_existing_position():
 
 
 def test_execute_buy_blocked_by_max_positions():
-    config = RiskConfig(max_open_positions=2)
+    config = RiskConfig(max_open_positions=2, commission_per_trade=0)
     mgr = ExecutionManager(config=config, place_order_fn=None)
     for ticker in ["AAPL", "TSLA"]:
         signal = Signal(ticker=ticker, action="BUY", confidence=0.8, reason="test")
@@ -44,7 +44,7 @@ def test_execute_buy_blocked_by_max_positions():
 
 
 def test_execute_sell_closes_position():
-    mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(commission_per_trade=0), place_order_fn=None)
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(buy, current_price=150.0)
     sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
@@ -55,7 +55,7 @@ def test_execute_sell_closes_position():
 
 
 def test_sell_without_position_opens_short():
-    mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(commission_per_trade=0), place_order_fn=None)
     signal = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
     result = mgr.process_signal(signal, current_price=150.0)
     assert result is not None
@@ -65,7 +65,7 @@ def test_sell_without_position_opens_short():
 
 
 def test_short_pnl_profit_when_price_drops():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500, commission_per_trade=0), place_order_fn=None)
     sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
     mgr.process_signal(sell, current_price=150.0)  # short 10 shares
     # Close short with a BUY
@@ -76,7 +76,7 @@ def test_short_pnl_profit_when_price_drops():
 
 
 def test_short_pnl_loss_when_price_rises():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500, commission_per_trade=0), place_order_fn=None)
     sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
     mgr.process_signal(sell, current_price=150.0)  # short 10 shares
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
@@ -85,7 +85,7 @@ def test_short_pnl_loss_when_price_rises():
 
 
 def test_short_stop_loss():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000, commission_per_trade=0), place_order_fn=None)
     sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
     mgr.process_signal(sell, current_price=100.0)  # short at 100
     # Price rose 3% — should trigger stop-loss on short
@@ -96,7 +96,7 @@ def test_short_stop_loss():
 
 
 def test_daily_loss_limit_halts_trading():
-    config = RiskConfig(daily_loss_limit=-100, max_position_value=10000)
+    config = RiskConfig(daily_loss_limit=-100, max_position_value=10000, commission_per_trade=0)
     mgr = ExecutionManager(config=config, place_order_fn=None)
     # Buy and sell at a loss
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
@@ -108,7 +108,7 @@ def test_daily_loss_limit_halts_trading():
 
 
 def test_trade_history_tracking():
-    mgr = ExecutionManager(config=RiskConfig(), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(commission_per_trade=0), place_order_fn=None)
     signal = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(signal, current_price=150.0)
     assert len(mgr.trades) == 1
@@ -117,7 +117,7 @@ def test_trade_history_tracking():
 
 
 def test_daily_pnl_tracking():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1500, commission_per_trade=0), place_order_fn=None)
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(buy, current_price=150.0)  # qty = 10
     sell = Signal(ticker="AAPL", action="SELL", confidence=0.8, reason="test")
@@ -126,7 +126,7 @@ def test_daily_pnl_tracking():
 
 
 def test_check_stop_losses_triggers_sell():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000, commission_per_trade=0), place_order_fn=None)
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(buy, current_price=100.0)  # qty = 10, entry = 100
     # Price dropped 3% — should trigger stop-loss at 2%
@@ -138,7 +138,7 @@ def test_check_stop_losses_triggers_sell():
 
 
 def test_check_stop_losses_no_trigger():
-    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000), place_order_fn=None)
+    mgr = ExecutionManager(config=RiskConfig(max_position_value=1000, commission_per_trade=0), place_order_fn=None)
     buy = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     mgr.process_signal(buy, current_price=100.0)
     # Price dropped only 1% — should NOT trigger stop-loss at 2%

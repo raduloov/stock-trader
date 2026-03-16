@@ -51,6 +51,7 @@ class RiskConfig:
     max_position_value: int = 1000
     max_open_positions: int = 5
     daily_loss_limit: int = -500
+    commission_per_trade: float = 1.0  # IBKR fixed rate ~$1 per trade
 
 
 @dataclass
