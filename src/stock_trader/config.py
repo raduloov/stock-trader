@@ -83,17 +83,23 @@ class Config:
 
 
 def _parse_watchlist(raw_list: list) -> list[TickerConfig]:
-    """Parse watchlist that can contain strings or dicts."""
+    """Parse watchlist that can contain strings or dicts. Deduplicates by symbol."""
     tickers = []
+    seen = set()
     for item in raw_list:
         if isinstance(item, str):
-            tickers.append(TickerConfig(symbol=item))
+            if item not in seen:
+                tickers.append(TickerConfig(symbol=item))
+                seen.add(item)
         elif isinstance(item, dict):
-            tickers.append(TickerConfig(
-                symbol=item["symbol"],
-                exchange=item.get("exchange", "SMART"),
-                currency=item.get("currency", "USD"),
-            ))
+            symbol = item["symbol"]
+            if symbol not in seen:
+                tickers.append(TickerConfig(
+                    symbol=symbol,
+                    exchange=item.get("exchange", "SMART"),
+                    currency=item.get("currency", "USD"),
+                ))
+                seen.add(symbol)
     return tickers
 
 
