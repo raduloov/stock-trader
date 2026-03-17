@@ -90,11 +90,13 @@ class CapitalEngine:
             if trade and self.on_trade:
                 self.on_trade(trade)
 
-        if signal.is_actionable(self.config.strategy.confidence_threshold):
+        is_act = signal.is_actionable(self.config.strategy.confidence_threshold)
+        logger.info("Actionable check: %s %s conf=%.2f thresh=%.2f result=%s",
+                     ticker, signal.action, signal.confidence, self.config.strategy.confidence_threshold, is_act)
+        if is_act:
             price = bars[-1].close
-            logger.info("Executing %s for %s @ %.2f (conf %.0f%% >= threshold %.0f%%)",
-                        signal.action, ticker, price, signal.confidence * 100,
-                        self.config.strategy.confidence_threshold * 100)
+            logger.info("Executing %s for %s @ %.2f",
+                        signal.action, ticker, price)
             trade = self.execution.process_signal(signal, price)
             if trade:
                 logger.info("Trade executed: %s %s %d @ %.2f", trade.action, trade.ticker, trade.quantity, trade.price)
