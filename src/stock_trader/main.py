@@ -143,8 +143,10 @@ def _run_bulk_test(config, from_date: str, to_date: str, strategy_filter: list[s
         results = run_bulk_backtest(config, from_date, to_date, strategy_filter, broker=broker)
         print_results(results)
     except ConnectionRefusedError:
-        print(f"\nCould not connect to IBKR at {config.ibkr.host}:{config.ibkr.port}")
-        print("IBKR connection is needed to fetch historical data.")
+        print(f"\nCould not connect to broker. Check your connection settings.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nError: {e}")
         sys.exit(1)
 
 
