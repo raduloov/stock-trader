@@ -206,7 +206,18 @@ class CapitalComMarketData:
     def subscribe(self, ticker: str) -> None:
         """Subscribe to a ticker. Looks up the Capital.com epic and fetches initial data."""
         if ticker not in self.epics:
-            # Search for the instrument
+            # First try exact match (ticker IS the epic)
+            try:
+                test_prices = self.client.get_prices(ticker, resolution="MINUTE", max_bars=1)
+                if test_prices:
+                    self.epics[ticker] = ticker
+                    logger.info("Mapped %s -> %s (exact match)", ticker, ticker)
+                    self._fetch_bars(ticker)
+                    return
+            except Exception:
+                pass
+
+            # Fall back to search
             markets = self.client.search_markets(ticker, limit=3)
             if markets:
                 self.epics[ticker] = markets[0]["epic"]

@@ -3,7 +3,9 @@ ibkr:
   port: 7497
   client_id: 20
 watchlist:
-- QQQ
+- GOLD
+- US100
+- US500
 market_data:
   bar_size: 5 secs
   history_window: 100
@@ -25,4 +27,4 @@ risk:
   max_position_value: 1000
   max_open_positions: 5
   daily_loss_limit: -500
-  commission_per_trade: 0.35
+  commission_per_trade: 0  # Capital.com CFDs are spread-only, no commission
