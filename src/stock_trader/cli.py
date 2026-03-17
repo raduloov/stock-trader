@@ -350,10 +350,13 @@ class TradingCLI:
                     update_counter += 1
                     if update_counter >= 5 or key:
                         update_counter = 0
-                        # Move cursor home (no clear — overwrite in place)
+                        # Move cursor home, print, then clear remaining lines
                         self.console.file.write("\033[H")
                         self.console.file.flush()
                         self.console.print(self._build_display())
+                        # Clear from cursor to end of screen (removes leftover content)
+                        self.console.file.write("\033[J")
+                        self.console.file.flush()
             finally:
                 # Leave alternate screen buffer
                 sys.stdout.write("\033[?1049l")
