@@ -6,7 +6,6 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -331,10 +330,12 @@ class TradingCLI:
         try:
             tty.setcbreak(sys.stdin.fileno())
 
-            # Cache the display and only update Live when content actually changes
-            last_display = None
-            with Live(self._build_display(), refresh_per_second=1, console=self.console, screen=True) as live:
-                update_counter = 0
+            # Enter alternate screen buffer
+            sys.stdout.write("\033[?1049h")
+            sys.stdout.flush()
+
+            update_counter = 0
+            try:
                 while self._running:
                     try:
                         self.engine.sleep(0.2)
@@ -346,11 +347,16 @@ class TradingCLI:
                     if key:
                         self._handle_key(key)
 
-                    # Only rebuild display every 5 ticks (~1s)
                     update_counter += 1
                     if update_counter >= 5 or key:
                         update_counter = 0
-                        display = self._build_display()
-                        live.update(display)
+                        # Move cursor home and clear screen
+                        sys.stdout.write("\033[H\033[2J")
+                        sys.stdout.flush()
+                        self.console.print(self._build_display())
+            finally:
+                # Leave alternate screen buffer
+                sys.stdout.write("\033[?1049l")
+                sys.stdout.flush()
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
