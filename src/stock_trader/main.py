@@ -83,6 +83,13 @@ def main() -> None:
         metavar="NAMES",
         help="Comma-separated strategy names for bulk test (e.g., Conservative,Aggressive)",
     )
+    parser.add_argument(
+        "--broker",
+        type=str,
+        choices=["ibkr", "capital"],
+        default="ibkr",
+        help="Broker to use: 'ibkr' (Interactive Brokers) or 'capital' (Capital.com CFDs). Default: ibkr",
+    )
     args = parser.parse_args()
 
     # Log to file so screen=True doesn't hide errors
@@ -123,6 +130,8 @@ def main() -> None:
             config.strategy.rsi_overbought = 55
             config.strategy.confidence_threshold = 0.3
         _run_backtest(config, args.backtest, args.speed, args.strategy)
+    elif args.broker == "capital":
+        _run_capital(config, args.strategy)
     else:
         _run_live(config, args.strategy)
 
@@ -159,6 +168,42 @@ def _run_backtest(config, date: str, speed: float, strategy: str) -> None:
     except ConnectionRefusedError:
         print(f"\nCould not connect to IBKR at {config.ibkr.host}:{config.ibkr.port}")
         print("IBKR connection is needed to fetch historical data for backtest.")
+        sys.exit(1)
+    finally:
+        engine.stop()
+
+
+def _run_capital(config, strategy: str) -> None:
+    from stock_trader.capital_com import CapitalComClient
+    from stock_trader.engine_capital import CapitalEngine
+    from stock_trader.cli import TradingCLI
+
+    api_key = os.environ.get("CAPITAL_API_KEY")
+    email = os.environ.get("CAPITAL_EMAIL")
+    password = os.environ.get("CAPITAL_PASSWORD")
+
+    if not all([api_key, email, password]):
+        print("Error: Capital.com requires these environment variables in .env:")
+        print("  CAPITAL_API_KEY=your-api-key")
+        print("  CAPITAL_EMAIL=your-email")
+        print("  CAPITAL_PASSWORD=your-password")
+        sys.exit(1)
+
+    print(f"Stock Day Trader v0.1.0 — Capital.com (demo)")
+    print(f"Strategy: {strategy} | Watchlist: {', '.join(config.watchlist)}")
+    print()
+
+    client = CapitalComClient(api_key=api_key, email=email, password=password, demo=True)
+    engine = CapitalEngine(config, client=client, strategy=strategy)
+    cli = TradingCLI(engine)
+
+    try:
+        engine.start()
+        cli.run()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    except Exception as e:
+        print(f"\nError: {e}")
         sys.exit(1)
     finally:
         engine.stop()
