@@ -21,8 +21,8 @@ from stock_trader.models import Bar, Signal
 
 logger = logging.getLogger(__name__)
 
-# Account capital for position sizing (will be updated from Capital.com)
-ACCOUNT_CAPITAL = 21000.0  # EUR demo account default
+# Account capital for position sizing
+ACCOUNT_CAPITAL = 50000.0  # USD
 RISK_PCT = 0.005  # 0.5% risk per trade
 
 
