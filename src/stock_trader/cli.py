@@ -6,7 +6,6 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -331,16 +330,15 @@ class TradingCLI:
         try:
             tty.setcbreak(sys.stdin.fileno())
 
-            # Use Rich Live with vertical_overflow to prevent flicker
-            with Live(
-                self._build_display(),
-                console=self.console,
-                screen=True,
-                refresh_per_second=1,
-            ) as live:
+            # Enter alternate screen buffer
+            sys.stdout.write("\033[?1049h")
+            sys.stdout.flush()
+
+            update_counter = 0
+            try:
                 while self._running:
                     try:
-                        self.engine.sleep(1.0)
+                        self.engine.sleep(0.2)
                     except (ConnectionError, OSError):
                         self._running = False
                         break
@@ -349,6 +347,19 @@ class TradingCLI:
                     if key:
                         self._handle_key(key)
 
-                    live.update(self._build_display(), refresh=True)
+                    update_counter += 1
+                    if update_counter >= 5 or key:
+                        update_counter = 0
+                        # Move cursor home, print, then clear remaining lines
+                        self.console.file.write("\033[H")
+                        self.console.file.flush()
+                        self.console.print(self._build_display())
+                        # Clear from cursor to end of screen (removes leftover content)
+                        self.console.file.write("\033[J")
+                        self.console.file.flush()
+            finally:
+                # Leave alternate screen buffer
+                sys.stdout.write("\033[?1049l")
+                sys.stdout.flush()
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
