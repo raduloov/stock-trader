@@ -1,8 +1,9 @@
 """
-Custom strategy: RSI oversold + VWAP confirmation.
+Custom strategy: RSI + VWAP confirmation on 5-min bars.
 
-BUY when: RSI <= 20 AND price > VWAP
-SELL when: RSI >= 80 OR stop-loss hit
+BUY when: RSI <= 25 AND price > VWAP
+SELL when: RSI >= 75 AND price < VWAP
+Timeframe: 5 min (use MINUTE_5 resolution from Capital.com)
 """
 import logging
 
@@ -17,7 +18,7 @@ def evaluate_custom(ticker: str, bars: list[Bar], positions: dict | None = None)
     if len(bars) < 20:
         return Signal(ticker=ticker, action="HOLD", confidence=0.0, reason="Insufficient data")
 
-    # Calculate RSI manually (14-period)
+    # Calculate RSI (14-period)
     closes = pd.Series([b.close for b in bars])
     delta = closes.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -44,39 +45,34 @@ def evaluate_custom(ticker: str, bars: list[Bar], positions: dict | None = None)
         return Signal(ticker=ticker, action="HOLD", confidence=0.0, reason="VWAP not ready")
 
     price_vs_vwap = (current_price - current_vwap) / current_vwap * 100
+    price_above_vwap = current_price > current_vwap
+    price_below_vwap = current_price < current_vwap
     has_position = ticker in (positions or {})
 
-    # BUY: RSI <= 20 AND price > VWAP
-    if current_rsi <= 20 and current_price > current_vwap:
-        confidence = min(0.5 + (20 - current_rsi) / 20 + price_vs_vwap / 2, 1.0)
+    # BUY: RSI <= 25 AND price > VWAP
+    if current_rsi <= 25 and price_above_vwap:
+        confidence = min(0.5 + (25 - current_rsi) / 25 + price_vs_vwap / 2, 1.0)
         return Signal(
             ticker=ticker,
             action="BUY",
             confidence=confidence,
-            reason=f"RSI oversold ({current_rsi:.0f}) + price above VWAP ({price_vs_vwap:+.2f}%)",
+            reason=f"RSI oversold ({current_rsi:.0f}) + above VWAP ({price_vs_vwap:+.2f}%)",
         )
 
-    # SELL: RSI >= 80 (take profit on overbought)
-    if current_rsi >= 80 and has_position:
-        confidence = min(0.5 + (current_rsi - 80) / 20, 1.0)
+    # SELL: RSI >= 75 AND price < VWAP
+    if current_rsi >= 75 and price_below_vwap:
+        confidence = min(0.5 + (current_rsi - 75) / 25 + abs(price_vs_vwap) / 2, 1.0)
         return Signal(
             ticker=ticker,
             action="SELL",
             confidence=confidence,
-            reason=f"RSI overbought ({current_rsi:.0f}) — take profit",
-        )
-
-    # SELL: price drops below VWAP while holding (momentum lost)
-    if current_price < current_vwap and has_position:
-        return Signal(
-            ticker=ticker,
-            action="SELL",
-            confidence=0.6,
-            reason=f"Price below VWAP ({price_vs_vwap:+.2f}%) — exit",
+            reason=f"RSI overbought ({current_rsi:.0f}) + below VWAP ({price_vs_vwap:+.2f}%)",
         )
 
     # Info for display
-    status = f"RSI={current_rsi:.0f}, VWAP dist={price_vs_vwap:+.2f}%"
-    if current_rsi <= 30:
-        status += " (approaching oversold)"
+    status = f"RSI={current_rsi:.0f}, VWAP={price_vs_vwap:+.2f}%"
+    if current_rsi <= 35:
+        status += " (approaching buy zone)"
+    elif current_rsi >= 65:
+        status += " (approaching sell zone)"
     return Signal(ticker=ticker, action="HOLD", confidence=0.0, reason=status)

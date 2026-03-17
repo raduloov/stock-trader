@@ -187,6 +187,7 @@ class CapitalComMarketData:
         self.client = client
         self.history_window = history_window
         self.poll_interval = poll_interval
+        self.resolution = "MINUTE_5"  # 5-min bars for strategy timeframe
         self.on_bar = on_bar
         self.bars: dict[str, list[Bar]] = defaultdict(list)
         self.epics: dict[str, str] = {}  # ticker -> Capital.com epic
@@ -246,7 +247,7 @@ class CapitalComMarketData:
             return
 
         try:
-            raw_prices = self.client.get_prices(epic, resolution="MINUTE", max_bars=self.history_window)
+            raw_prices = self.client.get_prices(epic, resolution=self.resolution, max_bars=self.history_window)
             if raw_prices:
                 self.bars[ticker] = [self._parse_bar(p) for p in raw_prices]
                 logger.info("Loaded %d bars for %s", len(self.bars[ticker]), ticker)
