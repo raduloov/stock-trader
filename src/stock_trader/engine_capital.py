@@ -92,9 +92,16 @@ class CapitalEngine:
 
         if signal.is_actionable(self.config.strategy.confidence_threshold):
             price = bars[-1].close
+            logger.info("Executing %s for %s @ %.2f (conf %.0f%% >= threshold %.0f%%)",
+                        signal.action, ticker, price, signal.confidence * 100,
+                        self.config.strategy.confidence_threshold * 100)
             trade = self.execution.process_signal(signal, price)
-            if trade and self.on_trade:
-                self.on_trade(trade)
+            if trade:
+                logger.info("Trade executed: %s %s %d @ %.2f", trade.action, trade.ticker, trade.quantity, trade.price)
+                if self.on_trade:
+                    self.on_trade(trade)
+            else:
+                logger.info("Trade rejected (risk limits or already in position)")
 
     def _place_order(self, ticker: str, action: str, quantity: int, price: float) -> None:
         """Place an order on Capital.com."""
