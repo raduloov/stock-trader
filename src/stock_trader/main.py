@@ -54,9 +54,9 @@ def main() -> None:
     parser.add_argument(
         "--strategy",
         type=str,
-        choices=["classic", "ai"],
+        choices=["classic", "ai", "custom"],
         default="classic",
-        help="Strategy to use: 'classic' (indicator rules) or 'ai' (Claude-powered). Default: classic",
+        help="Strategy: 'classic' (indicator rules), 'ai' (LLM-powered), 'custom' (RSI<=20 + VWAP). Default: classic",
     )
     parser.add_argument(
         "--bulk-test",

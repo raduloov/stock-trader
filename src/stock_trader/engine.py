@@ -6,6 +6,7 @@ from stock_trader.market_data import MarketDataManager
 from stock_trader.analysis import compute_indicators
 from stock_trader.strategy import evaluate
 from stock_trader.strategy_ai import evaluate_ai
+from stock_trader.strategy_custom import evaluate_custom
 from stock_trader.execution import ExecutionManager
 from stock_trader.models import Bar, Signal, Trade
 
@@ -79,6 +80,8 @@ class Engine:
         # 2. Evaluate strategy
         if self.strategy_mode == "ai":
             signal = evaluate_ai(indicators, bars, self.config.strategy, self.execution.positions)
+        elif self.strategy_mode == "custom":
+            signal = evaluate_custom(ticker, bars, self.execution.positions)
         else:
             signal = evaluate(indicators, self.config.strategy)
 
