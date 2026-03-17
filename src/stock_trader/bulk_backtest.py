@@ -155,8 +155,104 @@ def _get_trading_dates(start: str, end: str) -> list[str]:
 def _fetch_all_data(
     config: Config,
     dates: list[str],
+    broker: str = "ibkr",
 ) -> dict[str, dict[str, list[Bar]]]:
     """Fetch historical data for all tickers and dates. Returns {date: {ticker: [bars]}}."""
+    if broker == "capital":
+        return _fetch_all_data_capital(config, dates)
+    return _fetch_all_data_ibkr(config, dates)
+
+
+def _fetch_all_data_capital(
+    config: Config,
+    dates: list[str],
+) -> dict[str, dict[str, list[Bar]]]:
+    """Fetch historical data from Capital.com."""
+    import os
+    import time
+    from stock_trader.capital_com import CapitalComClient
+
+    print("Connecting to Capital.com to fetch historical data...")
+    client = CapitalComClient(
+        api_key=os.environ["CAPITAL_API_KEY"],
+        email=os.environ["CAPITAL_EMAIL"],
+        password=os.environ["CAPITAL_PASSWORD"],
+        demo=True,
+    )
+    client.connect()
+
+    # Resolve epics for all tickers
+    epics = {}
+    for ticker in config.watchlist:
+        # Try exact match first
+        try:
+            test = client.get_prices(ticker, resolution="MINUTE", max_bars=1)
+            if test:
+                epics[ticker] = ticker
+                continue
+        except Exception:
+            pass
+        # Fall back to search
+        markets = client.search_markets(ticker, limit=1)
+        if markets:
+            epics[ticker] = markets[0]["epic"]
+            print(f"  Mapped {ticker} -> {epics[ticker]} ({markets[0].get('instrumentName', '')})")
+        else:
+            print(f"  Warning: could not find {ticker} on Capital.com")
+
+    all_data: dict[str, dict[str, list[Bar]]] = {}
+    total = len(dates) * len(config.watchlist)
+    count = 0
+
+    for date in dates:
+        all_data[date] = {}
+
+        for ticker in config.watchlist:
+            count += 1
+            print(f"\r  Fetching data: {count}/{total} ({ticker} {date})...", end="", flush=True)
+
+            epic = epics.get(ticker)
+            if not epic:
+                all_data[date][ticker] = []
+                continue
+
+            try:
+                date_from = f"{date}T00:00:00"
+                date_to = f"{date}T23:59:59"
+                raw_prices = client.get_prices_for_date(epic, date_from, date_to, resolution="MINUTE")
+
+                if raw_prices:
+                    all_data[date][ticker] = [
+                        Bar(
+                            timestamp=datetime.fromisoformat(p["snapshotTime"].replace("T", " ").split(".")[0]),
+                            open=float(p.get("openPrice", {}).get("bid", 0)),
+                            high=float(p.get("highPrice", {}).get("bid", 0)),
+                            low=float(p.get("lowPrice", {}).get("bid", 0)),
+                            close=float(p.get("closePrice", {}).get("bid", 0)),
+                            volume=int(p.get("lastTradedVolume", 0)),
+                        )
+                        for p in raw_prices
+                    ]
+                else:
+                    all_data[date][ticker] = []
+
+                # Rate limit: Capital.com allows 10 req/sec
+                time.sleep(0.15)
+
+            except Exception as e:
+                logger.error("Failed to fetch %s for %s: %s", ticker, date, e)
+                all_data[date][ticker] = []
+
+    print(f"\r  Fetched data for {len(dates)} dates, {len(config.watchlist)} tickers.     ")
+    client.disconnect()
+    return all_data
+
+
+def _fetch_all_data_ibkr(
+    config: Config,
+    dates: list[str],
+) -> dict[str, dict[str, list[Bar]]]:
+    """Fetch historical data from IBKR."""
     print("Connecting to IBKR to fetch historical data...")
     ib = IB()
     ib.connect(
@@ -166,7 +262,6 @@ def _fetch_all_data(
     )
     ib.reqMarketDataType(3)
 
-    # Qualify all contracts first
     contracts = {}
     for tc in config.tickers:
         contract = Stock(tc.symbol, tc.exchange, tc.currency)
@@ -378,7 +473,7 @@ def _run_bar_strategy_on_day(
     return DayResult(date="", pnl=execution.daily_pnl, trades=len(execution.trades), wins=wins, losses=losses, capital_used=execution.max_capital_used)
 
 
-def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_filter: list[str] | None = None) -> list[StrategyResult]:
+def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_filter: list[str] | None = None, broker: str = "ibkr") -> list[StrategyResult]:
     """Run strategies across all dates and return results. Optionally filter by name."""
     dates = _get_trading_dates(start_date, end_date)
     if not dates:
@@ -406,7 +501,7 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_f
     print()
 
     # Fetch all data upfront
-    all_data = _fetch_all_data(config, dates)
+    all_data = _fetch_all_data(config, dates, broker=broker)
 
     valid_dates = [d for d in dates if any(all_data[d].get(t) for t in config.watchlist)]
     if not valid_dates:
