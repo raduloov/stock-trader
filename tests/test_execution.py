@@ -18,8 +18,8 @@ def test_execute_buy_respects_max_position_value():
     mgr = ExecutionManager(config=config, place_order_fn=None)
     signal = Signal(ticker="AAPL", action="BUY", confidence=0.8, reason="test")
     result = mgr.process_signal(signal, current_price=150.0)
-    # quantity = floor(1000 / 150) = 6
-    assert mgr.positions["AAPL"].quantity == 6
+    # quantity = round(1000 / 150, 2) = 6.67
+    assert mgr.positions["AAPL"].quantity == 6.67
 
 
 def test_execute_buy_blocked_by_existing_position():

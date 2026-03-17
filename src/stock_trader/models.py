@@ -41,7 +41,7 @@ class Signal:
 @dataclass
 class Position:
     ticker: str
-    quantity: int
+    quantity: float  # float for CFD fractional sizing
     entry_price: float
     direction: str = "LONG"  # "LONG" or "SHORT"
 
@@ -56,6 +56,6 @@ class Trade:
     timestamp: datetime
     ticker: str
     action: str  # "BUY", "SELL"
-    quantity: int
+    quantity: float  # float for CFD fractional sizing
     price: float
     reason: str

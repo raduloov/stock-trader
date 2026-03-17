@@ -108,7 +108,7 @@ class TradingCLI:
             table.add_row(
                 ticker,
                 dir_str,
-                str(pos.quantity),
+                f"{pos.quantity:.2f}" if isinstance(pos.quantity, float) else str(pos.quantity),
                 f"{pos.entry_price:.2f}",
                 f"{current:.2f}",
                 f"[{pnl_style}]{pnl:+.2f}[/{pnl_style}]",
@@ -134,7 +134,7 @@ class TradingCLI:
                 trade.timestamp.strftime("%H:%M:%S"),
                 f"[{action_style}]{trade.action}[/{action_style}]",
                 trade.ticker,
-                str(trade.quantity),
+                f"{trade.quantity:.2f}" if isinstance(trade.quantity, float) else str(trade.quantity),
                 f"{trade.price:.2f}",
                 trade.reason[:50],
             )

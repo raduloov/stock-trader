@@ -45,8 +45,8 @@ class ExecutionManager:
         if len(self.positions) >= self.config.max_open_positions:
             return None
 
-        # Calculate quantity
-        quantity = math.floor(self.config.max_position_value / price)
+        # Calculate quantity (round to 2 decimals for CFD support)
+        quantity = round(self.config.max_position_value / price, 2)
         if quantity <= 0:
             return None
 
@@ -124,7 +124,7 @@ class ExecutionManager:
         if len(self.positions) >= self.config.max_open_positions:
             return None
 
-        quantity = math.floor(self.config.max_position_value / price)
+        quantity = round(self.config.max_position_value / price, 2)
         if quantity <= 0:
             return None
 
