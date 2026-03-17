@@ -9,6 +9,7 @@ watchlist:
 market_data:
   bar_size: 5 secs
   history_window: 100
+  poll_interval: 10
 analysis:
   sma_period: 20
   ema_period: 12
@@ -19,10 +20,10 @@ analysis:
   bollinger_period: 20
   bollinger_std: 2
 strategy:
-  confidence_threshold: 0.6
-  rsi_oversold: 30
-  rsi_overbought: 70
-  stop_loss_pct: 2.0
+  confidence_threshold: 0.25
+  rsi_oversold: 48
+  rsi_overbought: 52
+  stop_loss_pct: 0.5
 risk:
   max_position_value: 1000
   max_open_positions: 5

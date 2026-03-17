@@ -68,6 +68,10 @@ class CapitalEngine:
         else:
             signal = evaluate(indicators, self.config.strategy)
 
+        logger.info("Signal %s: %s (%.0f%%) RSI=%.1f — %s",
+                     ticker, signal.action, signal.confidence * 100,
+                     indicators.rsi or 0, signal.reason)
+
         if self.on_signal:
             self.on_signal(signal)
 
