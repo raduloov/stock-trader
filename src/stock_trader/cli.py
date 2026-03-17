@@ -336,7 +336,7 @@ class TradingCLI:
                 self._build_display(),
                 console=self.console,
                 screen=True,
-                refresh_per_second=0,  # we control updates manually
+                refresh_per_second=1,
             ) as live:
                 while self._running:
                     try:
