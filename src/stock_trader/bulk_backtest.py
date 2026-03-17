@@ -184,15 +184,14 @@ def _fetch_all_data_capital(
     # Resolve epics for all tickers
     epics = {}
     for ticker in config.watchlist:
-        # Try exact match first
         try:
-            test = client.get_prices(ticker, resolution="MINUTE", max_bars=1)
+            test = client.get_prices(ticker, resolution="HOUR", max_bars=1)
             if test:
                 epics[ticker] = ticker
+                print(f"  Found {ticker}")
                 continue
         except Exception:
             pass
-        # Fall back to search
         markets = client.search_markets(ticker, limit=1)
         if markets:
             epics[ticker] = markets[0]["epic"]
@@ -200,50 +199,43 @@ def _fetch_all_data_capital(
         else:
             print(f"  Warning: could not find {ticker} on Capital.com")
 
-    all_data: dict[str, dict[str, list[Bar]]] = {}
-    total = len(dates) * len(config.watchlist)
-    count = 0
+    # Fetch all hourly data in one go per ticker (Capital.com doesn't support date ranges well)
+    # Then split into days
+    print("  Fetching hourly data (Capital.com demo limitation)...")
+    all_hourly: dict[str, list[Bar]] = {}
+    for ticker in config.watchlist:
+        epic = epics.get(ticker)
+        if not epic:
+            continue
+        try:
+            raw_prices = client.get_prices(epic, resolution="HOUR", max_bars=1000)
+            if raw_prices:
+                all_hourly[ticker] = [
+                    Bar(
+                        timestamp=datetime.fromisoformat(p["snapshotTime"].replace("T", " ").split(".")[0]),
+                        open=float(p.get("openPrice", {}).get("bid", 0)),
+                        high=float(p.get("highPrice", {}).get("bid", 0)),
+                        low=float(p.get("lowPrice", {}).get("bid", 0)),
+                        close=float(p.get("closePrice", {}).get("bid", 0)),
+                        volume=int(p.get("lastTradedVolume", 0)),
+                    )
+                    for p in raw_prices
+                ]
+                print(f"    {ticker}: {len(all_hourly[ticker])} hourly bars "
+                      f"({all_hourly[ticker][0].timestamp.date()} to {all_hourly[ticker][-1].timestamp.date()})")
+            time.sleep(0.2)
+        except Exception as e:
+            logger.error("Failed to fetch %s: %s", ticker, e)
 
+    # Split hourly data into days
+    all_data: dict[str, dict[str, list[Bar]]] = {}
     for date in dates:
         all_data[date] = {}
+        for ticker, bars in all_hourly.items():
+            day_bars = [b for b in bars if b.timestamp.strftime("%Y-%m-%d") == date]
+            all_data[date][ticker] = day_bars
 
-        for ticker in config.watchlist:
-            count += 1
-            print(f"\r  Fetching data: {count}/{total} ({ticker} {date})...", end="", flush=True)
-
-            epic = epics.get(ticker)
-            if not epic:
-                all_data[date][ticker] = []
-                continue
-
-            try:
-                date_from = f"{date}T00:00:00"
-                date_to = f"{date}T23:59:59"
-                raw_prices = client.get_prices_for_date(epic, date_from, date_to, resolution="MINUTE")
-
-                if raw_prices:
-                    all_data[date][ticker] = [
-                        Bar(
-                            timestamp=datetime.fromisoformat(p["snapshotTime"].replace("T", " ").split(".")[0]),
-                            open=float(p.get("openPrice", {}).get("bid", 0)),
-                            high=float(p.get("highPrice", {}).get("bid", 0)),
-                            low=float(p.get("lowPrice", {}).get("bid", 0)),
-                            close=float(p.get("closePrice", {}).get("bid", 0)),
-                            volume=int(p.get("lastTradedVolume", 0)),
-                        )
-                        for p in raw_prices
-                    ]
-                else:
-                    all_data[date][ticker] = []
-
-                # Rate limit: Capital.com allows 10 req/sec
-                time.sleep(0.15)
-
-            except Exception as e:
-                logger.error("Failed to fetch %s for %s: %s", ticker, date, e)
-                all_data[date][ticker] = []
-
-    print(f"\r  Fetched data for {len(dates)} dates, {len(config.watchlist)} tickers.     ")
+    print(f"  Split into {len(dates)} dates, {len(config.watchlist)} tickers.")
     client.disconnect()
     return all_data
 
