@@ -350,9 +350,9 @@ class TradingCLI:
                     update_counter += 1
                     if update_counter >= 5 or key:
                         update_counter = 0
-                        # Move cursor home and clear screen
-                        sys.stdout.write("\033[H\033[2J")
-                        sys.stdout.flush()
+                        # Move cursor home (no clear — overwrite in place)
+                        self.console.file.write("\033[H")
+                        self.console.file.flush()
                         self.console.print(self._build_display())
             finally:
                 # Leave alternate screen buffer
