@@ -214,7 +214,11 @@ class TradingCLI:
                 conn_str = "[green]Connected[/green]" if connected else "[red]Disconnected[/red]"
             except Exception:
                 conn_str = "[dim]N/A[/dim]"
-            text.append("  |  IBKR: ")
+            # Detect broker type
+            from stock_trader.capital_com import CapitalComClient
+            is_capital = isinstance(self.engine.market_data.ib, CapitalComClient)
+            broker_name = "Capital.com" if is_capital else "IBKR"
+            text.append(f"  |  {broker_name}: ")
             text.append_text(Text.from_markup(conn_str))
 
         return text
