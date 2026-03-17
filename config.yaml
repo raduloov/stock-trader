@@ -3,8 +3,9 @@ ibkr:
   port: 7497
   client_id: 20
 watchlist:
-  - GOLD
-  - US100
+  - GLD
+  - QQQ
+  - SPY
 market_data:
   bar_size: 5 secs
   history_window: 100

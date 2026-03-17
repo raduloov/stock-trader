@@ -16,6 +16,7 @@ from stock_trader.config import Config, StrategyConfig, RiskConfig, TickerConfig
 from stock_trader.execution import ExecutionManager
 from stock_trader.models import Bar, Signal
 from stock_trader.strategy import evaluate
+from stock_trader.strategy_custom import evaluate_custom
 from stock_trader.strategies import STRATEGY_REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,26 @@ class StrategyResult:
     @property
     def profitable_days(self) -> int:
         return sum(1 for d in self.days if d.pnl > 0)
+
+
+def _aggregate_to_5min(bars: list[Bar]) -> list[Bar]:
+    """Aggregate 1-minute bars into 5-minute bars."""
+    if not bars:
+        return []
+    result = []
+    for i in range(0, len(bars), 5):
+        chunk = bars[i:i + 5]
+        if not chunk:
+            break
+        result.append(Bar(
+            timestamp=chunk[0].timestamp,
+            open=chunk[0].open,
+            high=max(b.high for b in chunk),
+            low=min(b.low for b in chunk),
+            close=chunk[-1].close,
+            volume=sum(b.volume for b in chunk),
+        ))
+    return result
 
 
 def _get_trading_dates(start: str, end: str) -> list[str]:
@@ -472,18 +493,19 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_f
         print("No trading days in the specified range.")
         return []
 
-    # Build combined strategy list: indicator-based + bar-based
+    # Build combined strategy list: indicator-based + bar-based + custom
     all_strategies = {}
     for name, strat_config in STRATEGIES.items():
         all_strategies[name] = ("indicator", strat_config)
     for name, strat_fn in STRATEGY_REGISTRY.items():
         display_name = name.replace("_", " ").title()
         all_strategies[display_name] = ("bar", strat_fn)
+    all_strategies["Custom (RSI+VWAP)"] = ("custom", evaluate_custom)
 
     if strategy_filter:
         all_strategies = {k: v for k, v in all_strategies.items() if k in strategy_filter}
         if not all_strategies:
-            available = list(STRATEGIES.keys()) + [n.replace("_", " ").title() for n in STRATEGY_REGISTRY.keys()]
+            available = list(STRATEGIES.keys()) + [n.replace("_", " ").title() for n in STRATEGY_REGISTRY.keys()] + ["Custom (RSI+VWAP)"]
             print(f"No matching strategies. Available: {', '.join(available)}")
             return []
 
@@ -512,6 +534,10 @@ def run_bulk_backtest(config: Config, start_date: str, end_date: str, strategy_f
             ticker_bars = all_data[date]
             if strat_type == "indicator":
                 day_result = _run_strategy_on_day(strat, config.risk, config.analysis, ticker_bars)
+            elif strat_type == "custom":
+                # Aggregate 1-min bars to 5-min for custom strategy
+                bars_5min = {t: _aggregate_to_5min(bars) for t, bars in ticker_bars.items()}
+                day_result = _run_bar_strategy_on_day(strat, config.risk, bars_5min)
             else:
                 day_result = _run_bar_strategy_on_day(strat, config.risk, ticker_bars)
             day_result.date = date
